@@ -1,5 +1,6 @@
 //! [`Period`] — a periodicity-tagged count of periods.
 
+use core::cmp::Ordering;
 use core::fmt;
 use core::marker::PhantomData;
 
@@ -20,7 +21,9 @@ use crate::{Periodicity, TvmError};
 /// there is nothing else to infer from.
 ///
 /// A count may be fractional (e.g. `1.5` periods); it is always finite and
-/// non-negative.
+/// non-negative. Counts of the same periodicity are **totally ordered** by that
+/// value — see the [`Ord`] impl
+/// (`docs/adr/0059-the-finite-scalars-are-totally-ordered.md`).
 ///
 /// `Period` is available with the `std` or `libm` feature, alongside the
 /// operations that consume it (`docs/adr/0014-transcendental-single-sum-operations.md`).
@@ -49,7 +52,7 @@ use crate::{Periodicity, TvmError};
 ///     Money::agnostic(1000.0).unwrap(),
 /// );
 /// ```
-#[derive(Clone, Copy, PartialEq, PartialOrd)]
+#[derive(Clone, Copy)]
 pub struct Period<P: Periodicity> {
     count: f64,
     marker: PhantomData<P>,
@@ -138,6 +141,68 @@ impl<P: Periodicity> TryFrom<f64> for Period<P> {
     }
 }
 
+/// Orders counts of the same periodicity by their value.
+///
+/// The order is **total**, not partial: a `Period` is finite by construction, so
+/// `NaN` is unrepresentable. Comparing counts of *different* periodicities does not
+/// compile, so `Ord` never crosses clocks (ADR-0059).
+///
+/// ```
+/// use time_value::{Monthly, Period};
+///
+/// let term = Period::<Monthly>::new(360.0)?;
+/// let elapsed = Period::<Monthly>::new(12.0)?;
+///
+/// assert!(elapsed < term);
+/// assert_eq!(elapsed.min(term), elapsed);
+/// # Ok::<(), time_value::TvmError>(())
+/// ```
+///
+/// A monthly count cannot be compared with an annual one:
+///
+/// ```compile_fail
+/// use time_value::{Annual, Monthly, Period};
+///
+/// let monthly = Period::<Monthly>::new(12.0).unwrap();
+/// let annual = Period::<Annual>::new(1.0).unwrap();
+/// let _ = monthly > annual; // different periodicities — won't compile
+/// ```
+impl<P: Periodicity> Ord for Period<P> {
+    fn cmp(&self, other: &Self) -> Ordering {
+        // Unreachable fallback: every constructor rejects the non-finite counts, and
+        // two finite `f64`s always compare.
+        self.count
+            .partial_cmp(&other.count)
+            .unwrap_or(Ordering::Equal)
+    }
+}
+
+/// Delegates to the total order on [`Ord`], so it never returns `None`.
+impl<P: Periodicity> PartialOrd for Period<P> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+/// Two counts of the same periodicity are equal exactly when their values are.
+///
+/// Hand-written for the same reason as [`Rate`](crate::Rate)'s: a derived
+/// `PartialEq` carries a `P: PartialEq` bound that is not part of the
+/// [`Periodicity`] contract and would be inherited by [`Ord`] through its `Eq`
+/// supertrait. This is what made the *derived* `PartialOrd` this impl replaces
+/// unusable — no periodicity marker implements `PartialOrd`, so the derived bound
+/// could never be met and `a < b` did not compile for any `Period<P>` (ADR-0059).
+impl<P: Periodicity> PartialEq for Period<P> {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other).is_eq()
+    }
+}
+
+/// Equality on counts is a full equivalence relation — `NaN`, the only value that
+/// could break reflexivity, is unrepresentable. No [`Hash`](core::hash::Hash), for
+/// the reason given on [`Rate`](crate::Rate) (ADR-0059).
+impl<P: Periodicity> Eq for Period<P> {}
+
 /// Formats the bare count; the periodicity tag is a compile-time concern and is
 /// not shown.
 impl<P: Periodicity> fmt::Debug for Period<P> {
@@ -202,5 +267,61 @@ mod tests {
         );
         let n: Period<Monthly> = 3.0.try_into().unwrap();
         assert_eq!(n.value(), 3.0);
+    }
+
+    /// The comparison the *derived* `PartialOrd` never delivered: no periodicity
+    /// marker implements `PartialOrd`, so the derive's `P: PartialOrd` bound could
+    /// never be met and this body did not compile at all (ADR-0059).
+    #[test]
+    fn a_count_compares_with_another_of_its_periodicity() {
+        let term = Period::<Monthly>::new(360.0).unwrap();
+        let elapsed = Period::<Monthly>::new(12.0).unwrap();
+        let same_term = Period::<Monthly>::new(360.0).unwrap();
+
+        assert!(elapsed < term);
+        assert!(term > elapsed);
+        assert!(term >= same_term);
+        assert_eq!(elapsed.min(term), elapsed);
+        assert_eq!(elapsed.max(term), term);
+        assert!(Period::<Monthly>::ZERO < elapsed);
+    }
+
+    #[test]
+    fn cmp_agrees_with_partial_cmp() {
+        let counts = [0.0, 0.5, 1.0, 12.0, 1e9];
+        for &a in &counts {
+            for &b in &counts {
+                let (x, y) = (
+                    Period::<Monthly>::new(a).unwrap(),
+                    Period::<Monthly>::new(b).unwrap(),
+                );
+                assert_eq!(x.partial_cmp(&y), Some(x.cmp(&y)));
+                assert_eq!(x.cmp(&y), a.partial_cmp(&b).unwrap());
+            }
+        }
+    }
+
+    #[test]
+    fn counts_sort_by_value() {
+        let mut counts = [
+            Period::<Monthly>::new(12.0).unwrap(),
+            Period::<Monthly>::ZERO,
+            Period::<Monthly>::new(1.5).unwrap(),
+        ];
+        counts.sort_unstable();
+        assert_eq!(counts[0].value(), 0.0);
+        assert_eq!(counts[1].value(), 1.5);
+        assert_eq!(counts[2].value(), 12.0);
+    }
+
+    /// `new` accepts `-0.0` (it is finite and not negative), so the signed zeros are
+    /// both representable and must be one count under `Eq`/`Ord`.
+    #[test]
+    fn the_signed_zeros_are_one_count() {
+        let plus = Period::<Monthly>::new(0.0).unwrap();
+        let minus = Period::<Monthly>::new(-0.0).unwrap();
+
+        assert_eq!(plus, minus);
+        assert_eq!(plus.cmp(&minus), core::cmp::Ordering::Equal);
     }
 }

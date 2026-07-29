@@ -23,7 +23,7 @@ the old one **Superseded** (link both ways) — don't rewrite the old one.
 | [0002](0002-workspace-layout.md) | Workspace layout & crate boundaries | Accepted (amended by 0018) |
 | [0003](0003-synchronous-computation-model.md) | Synchronous computation model | Accepted |
 | [0004](0004-error-handling.md) | Error handling | Accepted |
-| [0005](0005-domain-modelling-and-strong-typing.md) | Domain modelling & strong typing | Accepted (amended by 0019) |
+| [0005](0005-domain-modelling-and-strong-typing.md) | Domain modelling & strong typing | Accepted (amended by 0019; extended by 0050, 0059) |
 | [0006](0006-license.md) | License | Accepted (amended by 0055) |
 | [0007](0007-rust-edition-and-msrv.md) | Rust edition & MSRV | Accepted |
 | [0008](0008-nix-flake-dev-environment.md) | Nix flake dev environment | Accepted |
@@ -53,7 +53,7 @@ the old one **Superseded** (link both ways) — don't rewrite the old one.
 | [0032](0032-ergonomic-convenience-impls.md) | Ergonomic convenience impls (`ZERO` / `Default` / `TryFrom` / `From`) | Accepted |
 | [0033](0033-core-domain-model-two-axes-and-an-f64-engine.md) | Core domain model — two axes, and an `f64` computation engine | Accepted |
 | [0034](0034-money-and-currency.md) | Money and currency — `f64` magnitude, a runtime ISO-4217 enum, and FX | Accepted (amended by 0053, 0057, 0058) |
-| [0035](0035-periodicity-tagged-time.md) | Periodicity-tagged time (`Period<P>`) | Accepted |
+| [0035](0035-periodicity-tagged-time.md) | Periodicity-tagged time (`Period<P>`) | Accepted (amended by 0059) |
 | [0036](0036-continuous-compounding-force-of-interest.md) | Continuous compounding — a periodicity-free force of interest | Accepted |
 | [0037](0037-currency-in-the-binaries.md) | Currency in the binaries — an opt-in code that is echoed, not rounded | Accepted |
 | [0038](0038-no-scheduled-release-continuous-development.md) | No scheduled release — continuous development | Accepted |
@@ -77,3 +77,4 @@ the old one **Superseded** (link both ways) — don't rewrite the old one.
 | [0056](0056-degenerate-rate-solves.md) | Degenerate rate solves report the degeneracy rather than the scan sentinel | Accepted (amends 0025, 0052) |
 | [0057](0057-currency-is-checked-where-a-result-is-denominated.md) | Currency is checked where a result is denominated — the rate solves do not fold it | Accepted (amends 0034) |
 | [0058](0058-money-display-carries-its-currency.md) | `Money`'s `Display` carries its currency — bare for `XXX`, magnitude then ISO code otherwise | Accepted (amends 0034) |
+| [0059](0059-the-finite-scalars-are-totally-ordered.md) | The finite-by-construction scalars are totally ordered (`Eq` + `Ord`), `Money` stays partial | Accepted (amends 0035, extends 0005) |
