@@ -145,7 +145,7 @@ impl<'a> DatedCashflows<'a> {
     /// (ADR-0021).
     pub fn net_present_value(self, rate: Rate<Annual>) -> Result<Money, TvmError> {
         let currency = self.currency()?;
-        Money::from_operation(self.xnpv_at(rate.value()), currency)
+        Money::from_operation(self.xnpv_at(rate.value()).value, currency)
     }
 
     /// The internal rate of return of the dated series (XIRR): the annual
@@ -176,11 +176,12 @@ impl<'a> DatedCashflows<'a> {
         if self.flows.is_empty() {
             return Err(TvmError::EmptyCashflows);
         }
-        // Newton from `guess`, then the robust bracketing fallback (ADR-0020), with
-        // the magnitude-scaled tolerance (ADR-0021) — all shared with IRR via `root`.
-        let tolerance = root::relative_tolerance(self.magnitude());
-        match root::newton(|r| self.xnpv_and_derivative(r), guess, tolerance)
-            .or_else(|| root::bracket_and_bisect(|r| self.xnpv_at(r), tolerance))
+        // Newton from `guess`, then the robust bracketing fallback (ADR-0020) — all
+        // shared with IRR via `root`, including its scale-carrying residual: XIRR
+        // has the same `XNPV(r) → CF₀` limit, so a near-zero first flow would
+        // otherwise make every large enough rate a root (ADR-0021, ADR-0054).
+        match root::newton(|r| self.xnpv_and_derivative(r), guess)
+            .or_else(|| root::bracket_and_bisect(|r| self.xnpv_at(r)))
         {
             Some(rate) => Rate::new(rate),
             None => Err(TvmError::IrrDidNotConverge),
@@ -189,49 +190,54 @@ impl<'a> DatedCashflows<'a> {
 
     /// The XNPV at a candidate annual `rate`: `Σᵢ CFᵢ (1 + r)^(−tᵢ)`, with `tᵢ`
     /// the offset in years rebased to the first flow. Empty series → `0`.
-    fn xnpv_at(self, rate: f64) -> f64 {
+    fn xnpv_at(self, rate: f64) -> root::Residual {
         let Some(first) = self.flows.first() else {
-            return 0.0;
+            return root::Residual {
+                value: 0.0,
+                scale: 0.0,
+            };
         };
         let reference = first.offset_years;
         let base = 1.0 + rate;
         let mut npv = 0.0;
+        let mut scale = 0.0;
         for cf in self.flows {
             let years = cf.offset_years - reference;
-            npv += cf.amount.value() * powf(base, -years);
+            let factor = powf(base, -years);
+            npv += cf.amount.value() * factor;
+            scale += abs(cf.amount.value()) * abs(factor);
         }
-        npv
+        root::Residual { value: npv, scale }
     }
 
-    /// The XNPV and its derivative d(XNPV)/dr at a candidate annual `rate`.
+    /// The XNPV, the scale it is judged against (`Σᵢ |CFᵢ| (1+r)^(−tᵢ)`), and its
+    /// derivative d(XNPV)/dr at a candidate annual `rate`.
     ///
     /// `XNPV(r) = Σᵢ CFᵢ (1+r)^(−tᵢ)`, `XNPV'(r) = Σᵢ −tᵢ CFᵢ (1+r)^(−tᵢ−1)`.
-    fn xnpv_and_derivative(self, rate: f64) -> (f64, f64) {
+    fn xnpv_and_derivative(self, rate: f64) -> (root::Residual, f64) {
         let Some(first) = self.flows.first() else {
-            return (0.0, 0.0);
+            return (
+                root::Residual {
+                    value: 0.0,
+                    scale: 0.0,
+                },
+                0.0,
+            );
         };
         let reference = first.offset_years;
         let base = 1.0 + rate;
         let mut npv = 0.0;
+        let mut scale = 0.0;
         let mut derivative = 0.0;
         for cf in self.flows {
             let years = cf.offset_years - reference;
             let amount = cf.amount.value();
             let factor = powf(base, -years); // (1+r)^(−t)
             npv += amount * factor;
+            scale += abs(amount) * abs(factor);
             derivative += -years * amount * factor / base; // (1+r)^(−t−1)
         }
-        (npv, derivative)
-    }
-
-    /// `Σ|CFᵢ|` — an upper bound on `|XNPV|`, used to scale the solver tolerance
-    /// (ADR-0021), mirroring [`Cashflows`](crate::Cashflows).
-    fn magnitude(self) -> f64 {
-        let mut scale = 0.0;
-        for cf in self.flows {
-            scale += abs(cf.amount.value());
-        }
-        scale
+        (root::Residual { value: npv, scale }, derivative)
     }
 }
 
@@ -339,6 +345,31 @@ mod tests {
             series.internal_rate_of_return(),
             Err(TvmError::EmptyCashflows)
         );
+    }
+
+    /// XIRR shares the solver, so it shared the defect: `XNPV(r) → CF₀` as
+    /// `r → ∞` just as `NPV` does, and a near-zero first flow made every large
+    /// enough rate pass the old fixed tolerance (ADR-0054). Dated version of the
+    /// `[0, 0, -100, 110]` reproduction, at whole-year offsets so the answer is the
+    /// same `0.1`.
+    #[test]
+    fn xirr_rejects_a_root_that_is_only_zero_because_everything_discounted_away() {
+        let flows = [
+            flow(0.0, 0.0),
+            flow(1.0, 0.0),
+            flow(2.0, -100.0),
+            flow(3.0, 110.0),
+        ];
+        for guess in [0.1, 0.9, 5.0, 50.0] {
+            let irr = DatedCashflows::new(&flows)
+                .internal_rate_of_return_from(guess)
+                .unwrap();
+            assert!(
+                approx(irr.value(), 0.1),
+                "guess {guess} found {} instead of the unique XIRR 0.1",
+                irr.value(),
+            );
+        }
     }
 
     #[test]

@@ -38,14 +38,14 @@ the old one **Superseded** (link both ways) — don't rewrite the old one.
 | [0017](0017-per-crate-msrv-core-1.85.md) | Per-crate MSRV — the core keeps 1.85, verified separately | Accepted |
 | [0018](0018-kebab-case-binary-crate-names.md) | Kebab-case binary crate names | Accepted |
 | [0019](0019-1.0-public-api-decisions.md) | 1.0 public API decisions | Accepted (§2 superseded by 0021; §1 serde drop reversed by 0042) |
-| [0020](0020-robust-irr-newton-with-bisection-fallback.md) | Robust IRR — Newton with a bisection fallback | Accepted (amended by 0021, 0025) |
-| [0021](0021-fallible-operations-on-non-finite-results.md) | Operations are fallible when their result can be non-finite | Accepted (amended by 0023) |
+| [0020](0020-robust-irr-newton-with-bisection-fallback.md) | Robust IRR — Newton with a bisection fallback | Accepted (amended by 0021, 0025, 0054) |
+| [0021](0021-fallible-operations-on-non-finite-results.md) | Operations are fallible when their result can be non-finite | Accepted (amended by 0023, 0054) |
 | [0022](0022-core-first-sequencing-before-the-first-release.md) | Core-first sequencing before the first release | Accepted |
 | [0023](0023-money-arithmetic-surface.md) | The `Money` arithmetic surface — `Neg` and `try_*` | Accepted |
 | [0024](0024-rate-conversions-effective-and-nominal.md) | Rate conversions — effective between periodicities, nominal as a quote | Accepted |
 | [0025](0025-solve-for-periods-and-rate.md) | Solve for periods (NPER) and rate (RATE) | Accepted |
 | [0026](0026-modified-internal-rate-of-return.md) | Modified internal rate of return (MIRR) | Accepted |
-| [0027](0027-amortization-schedule.md) | Amortization schedule as a lazy iterator | Accepted (amended by 0051) |
+| [0027](0027-amortization-schedule.md) | Amortization schedule as a lazy iterator | Accepted (amended by 0051, 0054) |
 | [0028](0028-binary-surface-conventions.md) | Binary surface conventions (CLI grammar & MCP tools) | Accepted |
 | [0029](0029-dated-cashflows-xnpv-xirr.md) | Dated cashflows — XNPV / XIRR | Accepted (amended by 0030) |
 | [0030](0030-shared-day-count-support-crate.md) | Shared day-count support crate | Accepted |
@@ -72,3 +72,4 @@ the old one **Superseded** (link both ways) — don't rewrite the old one.
 | [0051](0051-installment-private-fields.md) | `Installment`'s fields are private, read through accessors | Accepted (amends 0027) |
 | [0052](0052-tvmerror-variant-granularity.md) | `TvmError` variant granularity — a payload on `CurrencyMismatch`, `Undefined` split | Accepted (amends 0004, 0031) |
 | [0053](0053-fxrate-domain-and-currency-ordering.md) | `FxRate`'s domain is closed under reciprocal, `from` → `source`, and `Currency`'s ordering policy | Accepted (amends 0034) |
+| [0054](0054-numeric-robustness-of-the-core-operations.md) | Numeric robustness — schedule termination, rounding finiteness, cancellation-free annuity factors, and what counts as a root | Accepted (amends 0020, 0021, 0027) |

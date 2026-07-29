@@ -265,12 +265,20 @@ pub enum TvmError {
     /// (ADR-0052). Distinct from [`NegativePeriods`](Self::NegativePeriods), which
     /// rejects a *negative* count.
     ZeroPeriods,
-    /// A level payment does not exceed the interest accruing on the balance it is
-    /// meant to retire, so the balance never falls and no finite term exists. This
-    /// is `PMT ≤ PV·r` (or a zero payment against a positive balance).
+    /// A level payment does not reduce the balance it is meant to retire, so the
+    /// balance never falls and no finite term exists.
     ///
-    /// Returned by [`Schedule::with_payment`](amortization::Schedule::with_payment)
-    /// and [`annuity::periods`] (ADR-0052).
+    /// Arithmetically that is `PMT ≤ PV·r` — the payment does not cover the
+    /// interest — or a zero payment against a positive balance, which is what
+    /// [`annuity::periods`] rejects. [`Schedule::with_payment`] adds the
+    /// floating-point case (ADR-0054): a payment that *does* exceed the interest,
+    /// but by so little that the reduction is below the ULP of the balance, so
+    /// `balance − principal == balance` and the schedule would never end.
+    ///
+    /// Returned by [`Schedule::with_payment`] and [`annuity::periods`] (ADR-0052,
+    /// ADR-0054).
+    ///
+    /// [`Schedule::with_payment`]: amortization::Schedule::with_payment
     PaymentDoesNotAmortize,
     /// A solve has no real answer for the given inputs: the logarithm it needs has
     /// a non-positive argument, or the relationship is degenerate (a zero rate,
@@ -340,7 +348,7 @@ impl fmt::Display for TvmError {
             Self::DivisionByZero => f.write_str("amount cannot be divided by zero"),
             Self::ZeroPeriods => f.write_str("operation requires at least one period"),
             Self::PaymentDoesNotAmortize => f.write_str(
-                "payment does not exceed the interest accruing, so the balance is never amortised",
+                "payment does not reduce the balance it is meant to retire, so the balance is never amortised",
             ),
             Self::NoRealSolution => f.write_str("no real solution exists for these inputs"),
             Self::NegativePeriods => f.write_str("period count must be finite and non-negative"),

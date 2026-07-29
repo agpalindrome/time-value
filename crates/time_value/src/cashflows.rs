@@ -176,59 +176,55 @@ impl<'a, P: Periodicity> Cashflows<'a, P> {
         if self.flows.is_empty() {
             return Err(TvmError::EmptyCashflows);
         }
-        // Scale the convergence tolerance by `Σ|CFₜ|` (an upper bound on `|NPV|`):
-        // an absolute tolerance would be unreachable for a series measured in
-        // millions (ADR-0021). Try Newton from `guess`, then the robust bracketing
-        // fallback (ADR-0020) — both shared with XIRR via the `root` module.
-        let tolerance = root::relative_tolerance(self.magnitude());
-        match root::newton(|r| self.npv_and_derivative(r), guess, tolerance)
-            .or_else(|| root::bracket_and_bisect(|r| self.npv_at(r), tolerance))
+        // Try Newton from `guess`, then the robust bracketing fallback (ADR-0020) —
+        // both shared with XIRR via the `root` module. Each NPV sample carries the
+        // scale of its own discounted terms, so a rate is only a root when the NPV
+        // is negligible against the cashflows still visible *at that rate*
+        // (ADR-0021, ADR-0054).
+        match root::newton(|r| self.npv_and_derivative(r), guess)
+            .or_else(|| root::bracket_and_bisect(|r| self.npv_at(r)))
         {
             Some(rate) => Rate::new(rate),
             None => Err(TvmError::IrrDidNotConverge),
         }
     }
 
-    /// `Σ|CFₜ|` — an upper bound on `|NPV|`, used to scale the solver tolerance.
-    fn magnitude(self) -> f64 {
-        let mut scale = 0.0;
-        for cf in self.flows {
-            scale += abs(cf.value());
-        }
-        scale
-    }
-
     /// The NPV at a candidate per-period `rate` (no derivative), accumulated in
-    /// one pass: `NPV(r) = Σₜ CFₜ (1+r)⁻ᵗ`.
-    fn npv_at(self, rate: f64) -> f64 {
+    /// one pass: `NPV(r) = Σₜ CFₜ (1+r)⁻ᵗ`, alongside the scale it is judged
+    /// against, `Σₜ |CFₜ| (1+r)⁻ᵗ`.
+    fn npv_at(self, rate: f64) -> root::Residual {
         let discount = 1.0 / (1.0 + rate);
         let mut factor = 1.0; // discountᵗ
         let mut npv = 0.0;
+        let mut scale = 0.0;
         for cf in self.flows {
             npv += cf.value() * factor;
+            scale += abs(cf.value()) * abs(factor);
             factor *= discount;
         }
-        npv
+        root::Residual { value: npv, scale }
     }
 
     /// NPV and its derivative d(NPV)/dr at a candidate per-period `rate`.
     ///
     /// `NPV(r)  = Σₜ CFₜ (1+r)⁻ᵗ`, `NPV'(r) = Σₜ −t·CFₜ (1+r)⁻ᵗ⁻¹`. Both are
-    /// accumulated in one pass over the series.
-    fn npv_and_derivative(self, rate: f64) -> (f64, f64) {
+    /// accumulated in one pass over the series, with the residual's scale.
+    fn npv_and_derivative(self, rate: f64) -> (root::Residual, f64) {
         let discount = 1.0 / (1.0 + rate);
         let mut factor = 1.0; // discountᵗ
         let mut npv = 0.0;
+        let mut scale = 0.0;
         let mut derivative = 0.0;
         let mut t = 0.0;
         for cf in self.flows {
             let amount = cf.value();
             npv += amount * factor;
+            scale += abs(amount) * abs(factor);
             derivative += -t * amount * factor * discount;
             factor *= discount;
             t += 1.0;
         }
-        (npv, derivative)
+        (root::Residual { value: npv, scale }, derivative)
     }
 }
 
@@ -519,6 +515,12 @@ mod tests {
         ]
     }
 
+    /// `money`, for a series of any length — the tests that need four or five
+    /// flows. No allocation, so it stays available in the `no_std` build.
+    fn agnostic<const N: usize>(values: [f64; N]) -> [Money; N] {
+        values.map(|value| Money::agnostic(value).unwrap())
+    }
+
     #[test]
     fn npv_matches_manual_sum() {
         let flows = money(&[-100.0, 60.0, 60.0]);
@@ -650,6 +652,79 @@ mod tests {
         let rate = Rate::<Monthly>::new(0.0).unwrap();
         assert_eq!(series.net_present_value(rate), Err(TvmError::Overflow));
         assert_eq!(series.net_future_value(rate), Err(TvmError::Overflow));
+    }
+
+    /// The defect ADR-0054 fixes. `[0, 0, -100, 110]` is an ordinary
+    /// construction-phase shape — nothing happens for two periods, then an outlay
+    /// and a repayment — and its IRR is exactly `0.1`, uniquely:
+    /// `−100(1+r)⁻² + 110(1+r)⁻³ = 0` gives `1 + r = 1.1`. But `NPV(r) → CF₀ = 0`
+    /// as `r → ∞`, so against a tolerance fixed from `Σ|CFₜ|` every large enough
+    /// rate passed: `internal_rate_of_return_from(0.9)` answered `28114.44`, a
+    /// return of 2,811,444% per period.
+    #[test]
+    fn irr_rejects_a_root_that_is_only_zero_because_everything_discounted_away() {
+        let flows = agnostic([0.0, 0.0, -100.0, 110.0]);
+        let series = Cashflows::<Monthly>::new(&flows);
+        for guess in [0.1, 0.9, 5.0, 50.0, 0.0, -0.5] {
+            let irr = series.internal_rate_of_return_from(guess).unwrap();
+            assert!(
+                approx(irr.value(), 0.1),
+                "guess {guess} found {} instead of the unique IRR 0.1",
+                irr.value(),
+            );
+        }
+    }
+
+    /// The mechanism, confirmed from the other side: give the first flow a
+    /// magnitude above the old tolerance and the spurious roots disappear even
+    /// under the old rule. Both series must now solve to (near) the same rate.
+    #[test]
+    fn a_leading_zero_flow_does_not_change_the_rate_it_solves_to() {
+        let zero_led = agnostic([0.0, 0.0, -100.0, 110.0]);
+        let tiny_led = agnostic([-1e-6, 0.0, -100.0, 110.0]);
+        let a = Cashflows::<Monthly>::new(&zero_led)
+            .internal_rate_of_return_from(0.9)
+            .unwrap();
+        let b = Cashflows::<Monthly>::new(&tiny_led)
+            .internal_rate_of_return_from(0.9)
+            .unwrap();
+        assert!(within(a.value() - b.value(), 1e-6));
+    }
+
+    /// Whatever rate the solver returns, it must actually zero the NPV *relative to
+    /// the cashflows still being discounted at that rate* — the property the
+    /// acceptance rule now encodes. A rate 5 orders of magnitude off cannot satisfy
+    /// it, however small the raw NPV happens to be there (ADR-0054).
+    #[test]
+    fn every_located_irr_zeroes_the_npv_relative_to_its_own_terms() {
+        fn check<const N: usize>(values: [f64; N]) {
+            let flows = agnostic(values);
+            let cashflows = Cashflows::<Monthly>::new(&flows);
+            let Ok(irr) = cashflows.internal_rate_of_return() else {
+                return; // no root at all is a different (and honest) answer
+            };
+            let npv = cashflows.net_present_value(irr).unwrap().value();
+            // `Σ|CFₜ|(1+r)⁻ᵗ` at the located rate — the same scale the solver used.
+            let discount = 1.0 / (1.0 + irr.value());
+            let mut factor = 1.0;
+            let mut scale = 0.0;
+            for value in values {
+                scale += crate::root::abs(value) * factor;
+                factor *= discount;
+            }
+            assert!(
+                crate::root::abs(npv) <= 1e-6 * scale,
+                "{values:?} solved to {} with NPV {npv} against a term scale of {scale}",
+                irr.value(),
+            );
+        }
+
+        check([-100.0, 60.0, 60.0]);
+        check([0.0, 0.0, -100.0, 110.0]);
+        check([0.0, 0.0, 0.0, -100.0, 110.0]);
+        check([-1.0, 2.0, 0.0]);
+        check([-1_000_000.0, 600_000.0, 600_000.0]);
+        check([-100.0, 230.0, -132.0]);
     }
 
     #[test]

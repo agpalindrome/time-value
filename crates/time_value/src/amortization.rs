@@ -115,6 +115,24 @@ impl Installment {
 ///
 /// It holds only scalars, so iterating allocates nothing. See the
 /// [module docs](self) for the two ways to build one.
+///
+/// # It always terminates
+///
+/// The iterator ends when the balance reaches zero — and also, unconditionally,
+/// as soon as a period **fails to reduce the balance**. That second guard is what
+/// makes "until the balance is retired" a promise rather than a hope: once the
+/// per-period principal reduction falls below the ULP of the balance,
+/// `balance − principal == balance` in `f64` and the loan stops moving, so
+/// without it the iterator would yield forever (ADR-0054). Two shapes hit it —
+/// a payment that only just exceeds the first period's interest, which
+/// [`with_payment`](Self::with_payment) rejects up front as
+/// [`PaymentDoesNotAmortize`](TvmError::PaymentDoesNotAmortize); and a schedule
+/// that converges to a positive balance *asymptotically* (a negative rate), which
+/// runs healthily for a while and stalls only later, so it can only be caught
+/// here.
+///
+/// The `u32` period counter is likewise checked: a schedule that somehow reached
+/// period `2³² − 1` ends there rather than wrapping.
 #[derive(Debug, Clone)]
 pub struct Schedule<P: Periodicity> {
     balance: f64,
@@ -174,10 +192,15 @@ impl<P: Periodicity> Schedule<P> {
     /// # Errors
     ///
     /// - [`TvmError::PaymentDoesNotAmortize`] if `payment` cannot amortise
-    ///   `principal` — it does not exceed the first period's interest, so the
-    ///   balance would never fall and no finite schedule exists (ADR-0027,
-    ///   ADR-0031, ADR-0052). This is the same condition
-    ///   [`annuity::periods`](crate::annuity::periods) rejects.
+    ///   `principal` — the first period would not reduce the balance, so no finite
+    ///   schedule exists (ADR-0027, ADR-0031, ADR-0052, ADR-0054). That covers the
+    ///   arithmetic case [`annuity::periods`](crate::annuity::periods) rejects, a
+    ///   payment not exceeding the first period's interest (`PMT ≤ PV·r`), *and*
+    ///   the floating-point one it does not: a payment that exceeds the interest by
+    ///   so little that the reduction is smaller than the ULP of the balance, so
+    ///   `balance − principal == balance` and the balance never falls. The check is
+    ///   literally the iterator's own step, run once — the constructor and
+    ///   [`next`](Iterator::next) cannot disagree about what "amortises" means.
     /// - [`TvmError::CurrencyMismatch`] if `payment` and `principal` are in
     ///   distinct non-`Xxx` currencies, so the schedule has no single
     ///   denomination (ADR-0034).
@@ -187,21 +210,68 @@ impl<P: Periodicity> Schedule<P> {
         principal: Principal,
     ) -> Result<Self, TvmError> {
         let (payment, principal) = (payment.money(), principal.money());
-        // A payment that does not exceed the first period's interest never
-        // amortises a positive balance. (A non-positive balance is an empty
-        // schedule, handled by `next`.)
-        if principal.value() > 0.0 && payment.value() <= principal.value() * rate.value() {
-            return Err(TvmError::PaymentDoesNotAmortize);
-        }
-        Ok(Self {
+        let schedule = Self {
             balance: principal.value(),
             rate: rate.value(),
             payment: payment.value(),
             currency: combine(principal.currency(), payment.currency())?,
             period: 0,
             marker: PhantomData,
+        };
+        // Reject an unamortizable loan loudly here rather than handing back an
+        // empty schedule (ADR-0054). A non-positive balance is a different thing —
+        // there is nothing to repay, which is an empty schedule, not an error.
+        if schedule.balance > 0.0 && schedule.step().is_none() {
+            return Err(TvmError::PaymentDoesNotAmortize);
+        }
+        Ok(schedule)
+    }
+
+    /// This period's split of the payment, and the balance it leaves — or `None`
+    /// if the period does not **strictly** reduce the balance.
+    ///
+    /// The single definition of "a period that amortises", shared by
+    /// [`with_payment`](Self::with_payment)'s up-front check and
+    /// [`next`](Iterator::next)'s per-period one. A non-reducing period is fatal
+    /// rather than merely unproductive: nothing about the schedule's state changes
+    /// across it, so every period after it is identical and the iterator would
+    /// never end. `None` also absorbs a `NaN` balance, which no comparison would
+    /// otherwise catch.
+    fn step(&self) -> Option<Step> {
+        let interest = self.balance * self.rate;
+        // `due` is what it takes to close the loan this period. The final
+        // installment lands once the level payment covers it — within a hair, to
+        // absorb the floating-point residual of a computed level payment.
+        let due = self.balance + interest;
+        let closes = due <= self.payment * (1.0 + FINAL_INSTALLMENT_SLACK);
+        let (payment, principal, balance) = if closes {
+            (due, self.balance, 0.0)
+        } else {
+            let principal = self.payment - interest;
+            (self.payment, principal, self.balance - principal)
+        };
+        if balance.is_nan() || balance >= self.balance {
+            return None;
+        }
+        Some(Step {
+            payment,
+            interest,
+            principal,
+            balance,
         })
     }
+}
+
+/// One period's arithmetic, before it is denominated: the split of the payment and
+/// the balance left behind. The `f64` companion to [`Installment`], which
+/// [`Schedule::step`] produces and [`Schedule::next`](Iterator::next) turns into
+/// [`Money`] — named fields rather than a tuple so the four magnitudes cannot be
+/// transposed on the way through (ADR-0050).
+struct Step {
+    payment: f64,
+    interest: f64,
+    principal: f64,
+    balance: f64,
 }
 
 /// [`Schedule::for_term`] sizes the payment with [`annuity::payment`](crate::annuity::payment),
@@ -232,7 +302,12 @@ impl<P: Periodicity> Schedule<P> {
     /// As [`annuity::payment`](crate::annuity::payment) — [`TvmError::ZeroPeriods`]
     /// if `periods` is zero (nothing to amortise over) — then as
     /// [`with_payment`](Self::with_payment) for the sized payment, which can add
-    /// [`TvmError::CurrencyMismatch`] (ADR-0052).
+    /// [`TvmError::CurrencyMismatch`] (ADR-0052) and
+    /// [`TvmError::PaymentDoesNotAmortize`] (ADR-0054). The latter is reachable
+    /// here on extreme rate/term pairs: at a high enough rate over a long enough
+    /// term the level payment converges on the first period's interest, and once
+    /// the difference is below the ULP of the principal (`0.2` over `200` periods
+    /// is already there) no `f64` schedule retires the balance.
     pub fn for_term(
         rate: Rate<P>,
         periods: crate::Period<P>,
@@ -250,26 +325,19 @@ impl<P: Periodicity> Iterator for Schedule<P> {
         if self.balance <= 0.0 {
             return None;
         }
-        let interest = self.balance * self.rate;
-        // `due` is what it takes to close the loan this period. The final
-        // installment lands once the level payment covers it — within a hair, to
-        // absorb the floating-point residual of a computed level payment.
-        let due = self.balance + interest;
-        let closes = due <= self.payment * (1.0 + FINAL_INSTALLMENT_SLACK);
-        let (payment, principal, balance) = if closes {
-            (due, self.balance, 0.0)
-        } else {
-            let principal = self.payment - interest;
-            (self.payment, principal, self.balance - principal)
-        };
-        self.period += 1;
-        self.balance = balance;
+        // Both `?`s end the schedule: a period that cannot reduce the balance
+        // would repeat forever, and a period index past `u32::MAX` cannot be
+        // reported (ADR-0054). Neither can happen to a healthy loan.
+        let step = self.step()?;
+        let period = self.period.checked_add(1)?;
+        self.period = period;
+        self.balance = step.balance;
         Some(Installment {
-            period: self.period,
-            payment: Money::from_operation(payment, self.currency).ok()?,
-            interest: Money::from_operation(interest, self.currency).ok()?,
-            principal: Money::from_operation(principal, self.currency).ok()?,
-            balance: Money::from_operation(balance, self.currency).ok()?,
+            period,
+            payment: Money::from_operation(step.payment, self.currency).ok()?,
+            interest: Money::from_operation(step.interest, self.currency).ok()?,
+            principal: Money::from_operation(step.principal, self.currency).ok()?,
+            balance: Money::from_operation(step.balance, self.currency).ok()?,
         })
     }
 }
@@ -370,6 +438,143 @@ mod tests {
         );
     }
 
+    /// The defect ADR-0054 fixes: each of these constructed `Ok` and then iterated
+    /// forever, because the principal reduction was below the ULP of the balance
+    /// so `balance - principal == balance`. They stall in the *first* period, so
+    /// the constructor now rejects them outright.
+    #[test]
+    fn a_payment_too_small_to_move_the_balance_does_not_amortise() {
+        let unamortizable = |r: f64, pmt: f64, principal: f64| {
+            Schedule::with_payment(
+                rate(r),
+                Payment(Money::agnostic(pmt).unwrap()),
+                Principal(Money::agnostic(principal).unwrap()),
+            )
+            .map(Schedule::count)
+        };
+
+        // Strictly more than the 1000.0 of first-period interest, but 20_000 has a
+        // ULP of ~3.6e-12, so the 1e-12 reduction rounds away entirely.
+        assert_eq!(
+            unamortizable(0.05, 1_000.000_000_000_001, 20_000.0),
+            Err(TvmError::PaymentDoesNotAmortize),
+        );
+        // The same at a zero rate: 1e9 has a ULP of ~1.2e-7, so a 1e-8 payment
+        // reduces nothing at all.
+        assert_eq!(
+            unamortizable(0.0, 1e-8, 1e9),
+            Err(TvmError::PaymentDoesNotAmortize),
+        );
+    }
+
+    /// A negative rate can make the balance converge to a positive limit
+    /// *asymptotically*: every period genuinely reduces it, so no up-front check
+    /// can reject the loan, and it is the iterator's own per-period guard that has
+    /// to stop it once the reductions fall below the ULP (ADR-0054). This is the
+    /// case that proves the constructor check alone is not enough.
+    #[test]
+    fn an_asymptotic_schedule_terminates_without_retiring_the_balance() {
+        // -10% per period on 1000 accrues -100 of interest, and paying -50 leaves
+        // +50 of principal: the balance falls 1000 → 950 → 905 → … → 500, where
+        // the interest exactly matches the payment and it can fall no further.
+        let schedule = Schedule::with_payment(
+            rate(-0.10),
+            Payment(Money::agnostic(-50.0).unwrap()),
+            Principal(Money::agnostic(1000.0).unwrap()),
+        )
+        .unwrap();
+
+        let installments: usize = schedule.clone().count();
+        assert!(
+            installments > 0 && installments < 10_000,
+            "expected a long-but-finite schedule, got {installments}",
+        );
+        // It stops short of zero, at the limit it converges to — the balance is
+        // never retired, so the schedule simply ends.
+        let last = schedule.last().unwrap();
+        assert!(approx(last.balance().value(), 500.0, 1e-6));
+    }
+
+    /// Every schedule is finite. `take(n).count()` is bounded by `n` whatever the
+    /// inputs, so this asserts the stronger thing: the schedule ends *on its own*,
+    /// below a bound no legitimate loan approaches (ADR-0045 rule 2 — the class,
+    /// not the instance).
+    #[test]
+    fn every_schedule_terminates() {
+        // (rate, payment, principal) triples spanning the pathological shapes:
+        // barely-amortising, zero-rate, negative-rate asymptotic, and healthy.
+        let cases = [
+            (0.05, 1_000.000_000_000_001, 20_000.0),
+            (0.0, 1e-8, 1e9),
+            (-0.10, -50.0, 1000.0),
+            (-0.5, -1.0, 1e6),
+            (0.10, 500.0, 1000.0),
+            (0.05, 300.0, 2000.0),
+            (1e-12, 1.0, 1e6),
+            (0.0, 1.0, 1e6),
+            (-1e-9, 1.0, 1e5),
+        ];
+        for (r, payment, principal) in cases {
+            let Ok(schedule) = Schedule::with_payment(
+                rate(r),
+                Payment(Money::agnostic(payment).unwrap()),
+                Principal(Money::agnostic(principal).unwrap()),
+            ) else {
+                continue; // rejected up front, which is also termination
+            };
+            let taken = schedule.take(2_000_000).count();
+            assert!(
+                taken < 2_000_000,
+                "rate {r}, payment {payment}, principal {principal} did not terminate",
+            );
+        }
+    }
+
+    /// A stalling schedule yields nothing further — it does not emit a repeated
+    /// installment whose balance never moves.
+    #[test]
+    fn a_stalled_period_ends_the_schedule_rather_than_repeating() {
+        let mut schedule = Schedule::with_payment(
+            rate(-0.10),
+            Payment(Money::agnostic(-50.0).unwrap()),
+            Principal(Money::agnostic(1000.0).unwrap()),
+        )
+        .unwrap();
+        let mut previous = f64::INFINITY;
+        for installment in schedule.by_ref() {
+            assert!(
+                installment.balance().value() < previous,
+                "period {} did not reduce the balance",
+                installment.period(),
+            );
+            previous = installment.balance().value();
+        }
+        // Exhausted iterators stay exhausted.
+        assert!(schedule.next().is_none());
+    }
+
+    /// `next` used to do `self.period += 1`, which panics in a debug build
+    /// ("attempt to add with overflow") once the counter wraps at `2³²` — reachable
+    /// only because the iterator could run forever, but pinned independently so the
+    /// counter cannot panic even if it is somehow driven that far (ADR-0054). The
+    /// schedule is built by struct literal because no public constructor can put a
+    /// schedule in this state.
+    #[test]
+    fn the_period_counter_cannot_overflow() {
+        use core::marker::PhantomData;
+        let mut schedule = Schedule::<Monthly> {
+            balance: 1000.0,
+            rate: 0.10,
+            payment: 500.0,
+            currency: crate::Currency::Xxx,
+            period: u32::MAX,
+            marker: PhantomData,
+        };
+        // The period would be 2^32, which `u32` cannot hold: the schedule ends
+        // instead of wrapping to 0 (or panicking).
+        assert!(schedule.next().is_none());
+    }
+
     #[test]
     fn a_non_positive_principal_is_an_empty_schedule() {
         let mut schedule = Schedule::with_payment(
@@ -405,6 +610,24 @@ mod tests {
             assert!(approx(principal_repaid, principal.value(), 1e-6));
             // ...and the loan is fully repaid at the end.
             assert!(approx(final_balance, 0.0, 1e-6));
+        }
+
+        /// `for_term` sizes the payment itself, so it can size one that cannot
+        /// amortise: at 20% over 200 periods the level payment exceeds the first
+        /// period's interest by ~3.6e-12 while the ULP of the `100_000` balance is
+        /// ~1.5e-11, so no period ever moves it. This used to iterate forever —
+        /// the CLI died allocating 2.6 GB collecting it (ADR-0054).
+        #[test]
+        fn a_term_whose_payment_cannot_move_the_balance_is_rejected() {
+            assert_eq!(
+                Schedule::for_term(
+                    rate(0.2),
+                    Period::new(200.0).unwrap(),
+                    Money::agnostic(100_000.0).unwrap(),
+                )
+                .map(Schedule::count),
+                Err(crate::TvmError::PaymentDoesNotAmortize),
+            );
         }
 
         #[test]
