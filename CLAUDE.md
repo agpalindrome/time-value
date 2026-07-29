@@ -33,6 +33,13 @@ logged under `docs/adr/`.
   with fallible constructors, but type aliases and inference keep the common
   path one-liner-clean. Avoid full dimensional-analysis types — TVM stays in
   "money", so they add ceremony without catching the real (semantic) errors.
+- **Transposable arguments get a role newtype** (ADR-0050). Where an operation
+  takes two adjacent arguments of the *same* type — two `Money`, or a rate and a
+  growth rate — the ambiguous positions are tagged (`Payment`, `PresentValue`,
+  `FutureValue`, `Principal`, `Growth<P>`) so a swap is a compile error. They
+  validate nothing and cost nothing; there is deliberately **no** `From<Money>` /
+  `From<Rate<P>>` into a role (it would let both orders compile again). Positions
+  that cannot be confused — a lone `Money` argument — stay untagged.
 - **`#![no_std]` + zero dependencies.** Transcendental functions (`powf`, `ln`,
   `exp`) are `std`-only; when the API needs them, prefer an optional `libm`
   feature over an unconditional dependency.

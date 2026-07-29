@@ -20,10 +20,19 @@ Values are validated newtypes, and **periodicity is part of the type**:
   `Periodicity` marker `P` (`Annual`, `SemiAnnual`, `Quarterly`, `Monthly`,
   `Weekly`, `Daily`).
 - `Cashflows<P>` — a periodicity-tagged series.
+- `Payment`, `PresentValue`, `FutureValue`, `Principal`, `Growth<P>` — zero-cost
+  *role* markers, used where an operation takes two same-typed arguments a caller
+  could transpose.
 
 Because `Rate<Monthly>` and `Rate<Annual>` are distinct types, discounting
 monthly cashflows with an annual rate **does not compile** — the classic TVM bug
 is caught before it can run.
+
+The role markers catch its twin. `annuity::periods(rate, Payment(pmt),
+PresentValue(pv))` and `single_sum::periods(rate, PresentValue(pv),
+FutureValue(fv))` take their two amounts in *different* orders; wrapping each in
+its role makes swapping them a compile error rather than a plausible wrong answer
+(`docs/adr/0050-role-newtypes-for-ambiguous-arguments.md`).
 
 ## What it computes
 

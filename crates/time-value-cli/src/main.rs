@@ -27,7 +27,8 @@ use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use time_value::{
     amortization, annuity, continuous, single_sum, Annual, Cashflows, ContinuousRate, Currency,
-    DatedCashflow, DatedCashflows, FxRate, Money, Monthly, Period, Rate,
+    DatedCashflow, DatedCashflows, FutureValue, FxRate, Growth, Money, Monthly, Payment, Period,
+    PresentValue, Principal, Rate,
 };
 use time_value_daycount::{act365_year_fraction, iso_to_day};
 
@@ -735,8 +736,8 @@ fn run_single_sum(command: SingleSumCommand, currency: Currency) -> Result<Scala
         } => {
             let n = single_sum::periods(
                 rate(r)?,
-                money(present, currency)?,
-                money(future, currency)?,
+                PresentValue(money(present, currency)?),
+                FutureValue(money(future, currency)?),
             )
             .context("number of periods is undefined for these inputs")?;
             plain_out(n.value())
@@ -748,8 +749,8 @@ fn run_single_sum(command: SingleSumCommand, currency: Currency) -> Result<Scala
         } => {
             let r = single_sum::rate::<Per>(
                 period(n)?,
-                money(present, currency)?,
-                money(future, currency)?,
+                PresentValue(money(present, currency)?),
+                FutureValue(money(future, currency)?),
             )
             .context("no rate solves these inputs")?;
             plain_out(r.value())
@@ -797,13 +798,15 @@ fn run_annuity(command: AnnuityCommand, currency: Currency) -> Result<ScalarOutp
             future,
         } => {
             let n = match anchor(present, future)? {
-                Anchor::Present(p) => {
-                    annuity::periods(rate(r)?, money(payment, currency)?, money(p, currency)?)
-                }
+                Anchor::Present(p) => annuity::periods(
+                    rate(r)?,
+                    Payment(money(payment, currency)?),
+                    PresentValue(money(p, currency)?),
+                ),
                 Anchor::Future(f) => annuity::periods_from_future(
                     rate(r)?,
-                    money(payment, currency)?,
-                    money(f, currency)?,
+                    Payment(money(payment, currency)?),
+                    FutureValue(money(f, currency)?),
                 ),
             }
             .context("number of periods is undefined for these inputs")?;
@@ -816,13 +819,15 @@ fn run_annuity(command: AnnuityCommand, currency: Currency) -> Result<ScalarOutp
             future,
         } => {
             let r = match anchor(present, future)? {
-                Anchor::Present(p) => {
-                    annuity::rate::<Per>(period(n)?, money(payment, currency)?, money(p, currency)?)
-                }
+                Anchor::Present(p) => annuity::rate::<Per>(
+                    period(n)?,
+                    Payment(money(payment, currency)?),
+                    PresentValue(money(p, currency)?),
+                ),
                 Anchor::Future(f) => annuity::rate_from_future::<Per>(
                     period(n)?,
-                    money(payment, currency)?,
-                    money(f, currency)?,
+                    Payment(money(payment, currency)?),
+                    FutureValue(money(f, currency)?),
                 ),
             }
             .context("no rate solves these inputs")?;
@@ -838,9 +843,12 @@ fn run_annuity(command: AnnuityCommand, currency: Currency) -> Result<ScalarOutp
             growth,
             payment,
         } => {
-            let pv =
-                annuity::growing_perpetuity(rate(r)?, rate(growth)?, money(payment, currency)?)
-                    .context("growing perpetuity diverges (rate must exceed growth)")?;
+            let pv = annuity::growing_perpetuity(
+                rate(r)?,
+                Growth(rate(growth)?),
+                money(payment, currency)?,
+            )
+            .context("growing perpetuity diverges (rate must exceed growth)")?;
             money_out(pv)
         }
         AnnuityCommand::Growing { command } => run_annuity_growing(command, currency)?,
@@ -860,7 +868,7 @@ fn run_annuity_growing(command: AnnuityGrowingCommand, currency: Currency) -> Re
             payment,
         } => money_out(annuity::growing_present_value(
             rate(r)?,
-            rate(growth)?,
+            Growth(rate(growth)?),
             period(n)?,
             money(payment, currency)?,
         )?),
@@ -871,7 +879,7 @@ fn run_annuity_growing(command: AnnuityGrowingCommand, currency: Currency) -> Re
             payment,
         } => money_out(annuity::growing_future_value(
             rate(r)?,
-            rate(growth)?,
+            Growth(rate(growth)?),
             period(n)?,
             money(payment, currency)?,
         )?),
@@ -882,7 +890,7 @@ fn run_annuity_growing(command: AnnuityGrowingCommand, currency: Currency) -> Re
             payment,
         } => money_out(annuity::due::growing_present_value(
             rate(r)?,
-            rate(growth)?,
+            Growth(rate(growth)?),
             period(n)?,
             money(payment, currency)?,
         )?),
@@ -893,7 +901,7 @@ fn run_annuity_growing(command: AnnuityGrowingCommand, currency: Currency) -> Re
             payment,
         } => money_out(annuity::due::growing_future_value(
             rate(r)?,
-            rate(growth)?,
+            Growth(rate(growth)?),
             period(n)?,
             money(payment, currency)?,
         )?),
@@ -1068,9 +1076,11 @@ fn run_amortize(
     let principal = money(principal, currency)?;
     let schedule = match (periods, payment) {
         (Some(n), None) => amortization::Schedule::<Per>::for_term(rate, period(n)?, principal),
-        (None, Some(p)) => {
-            amortization::Schedule::<Per>::with_payment(rate, money(p, currency)?, principal)
-        }
+        (None, Some(p)) => amortization::Schedule::<Per>::with_payment(
+            rate,
+            Payment(money(p, currency)?),
+            Principal(principal),
+        ),
         (None, None) => bail!("provide either --periods or --payment"),
         (Some(_), Some(_)) => bail!("--periods and --payment are mutually exclusive"),
     }

@@ -14,7 +14,7 @@
 use core::marker::PhantomData;
 
 use crate::money::combine;
-use crate::{Currency, Money, Periodicity, Rate, TvmError};
+use crate::{Currency, Money, Payment, Periodicity, Principal, Rate, TvmError};
 
 /// Relative slack on the "this payment closes the loan" test, so the
 /// floating-point residual of a *computed* level payment still lands the final
@@ -64,16 +64,20 @@ impl<P: Periodicity> Schedule<P> {
     ///
     /// A non-positive `principal` yields an empty schedule (nothing to repay).
     ///
+    /// The two amounts are wrapped in [`Payment`] and [`Principal`] so they cannot
+    /// be transposed — a swap that would otherwise compile and silently amortise
+    /// the payment with the principal (ADR-0050).
+    ///
     /// # Examples
     ///
     /// ```
-    /// use time_value::{amortization::Schedule, Money, Monthly, Rate};
+    /// use time_value::{amortization::Schedule, Money, Monthly, Payment, Principal, Rate};
     ///
     /// // Repay 1000 at 10%/period, paying 500 each period.
     /// let mut schedule = Schedule::with_payment(
     ///     Rate::<Monthly>::new(0.10)?,
-    ///     Money::agnostic(500.0)?,
-    ///     Money::agnostic(1000.0)?,
+    ///     Payment(Money::agnostic(500.0)?),
+    ///     Principal(Money::agnostic(1000.0)?),
     /// )?;
     ///
     /// let first = schedule.next().unwrap();
@@ -84,12 +88,30 @@ impl<P: Periodicity> Schedule<P> {
     /// # Ok::<(), time_value::TvmError>(())
     /// ```
     ///
+    /// Handing it the payment and the principal the other way round does not
+    /// compile:
+    ///
+    /// ```compile_fail
+    /// use time_value::{amortization::Schedule, Money, Monthly, Payment, Principal, Rate};
+    ///
+    /// let _ = Schedule::with_payment(
+    ///     Rate::<Monthly>::new(0.10).unwrap(),
+    ///     Principal(Money::agnostic(1000.0).unwrap()), // principal where the payment goes
+    ///     Payment(Money::agnostic(500.0).unwrap()),
+    /// );
+    /// ```
+    ///
     /// # Errors
     ///
     /// [`TvmError::Undefined`] if `payment` cannot amortise `principal` — it
     /// does not exceed the first period's interest, so the balance would never
     /// fall and no finite schedule exists (ADR-0027, ADR-0031).
-    pub fn with_payment(rate: Rate<P>, payment: Money, principal: Money) -> Result<Self, TvmError> {
+    pub fn with_payment(
+        rate: Rate<P>,
+        payment: Payment,
+        principal: Principal,
+    ) -> Result<Self, TvmError> {
+        let (payment, principal) = (payment.money(), principal.money());
         // A payment that does not exceed the first period's interest never
         // amortises a positive balance. (A non-positive balance is an empty
         // schedule, handled by `next`.)
@@ -140,7 +162,7 @@ impl<P: Periodicity> Schedule<P> {
         principal: Money,
     ) -> Result<Self, TvmError> {
         let payment = crate::annuity::payment(rate, periods, principal)?;
-        Self::with_payment(rate, payment, principal)
+        Self::with_payment(rate, Payment(payment), Principal(principal))
     }
 }
 
@@ -178,7 +200,7 @@ impl<P: Periodicity> Iterator for Schedule<P> {
 #[cfg(test)]
 mod tests {
     use super::Schedule;
-    use crate::{Money, Monthly, Rate, TvmError};
+    use crate::{Money, Monthly, Payment, Principal, Rate, TvmError};
 
     fn approx(a: f64, b: f64, tolerance: f64) -> bool {
         let d = a - b;
@@ -194,8 +216,8 @@ mod tests {
         // 1000 at 10%, paying 500: 400/600, then 440/160, then a 176 stub.
         let mut schedule = Schedule::with_payment(
             rate(0.10),
-            Money::agnostic(500.0).unwrap(),
-            Money::agnostic(1000.0).unwrap(),
+            Payment(Money::agnostic(500.0).unwrap()),
+            Principal(Money::agnostic(1000.0).unwrap()),
         )
         .unwrap();
 
@@ -224,8 +246,8 @@ mod tests {
     fn interest_plus_principal_equals_each_payment() {
         let schedule = Schedule::with_payment(
             rate(0.05),
-            Money::agnostic(300.0).unwrap(),
-            Money::agnostic(2000.0).unwrap(),
+            Payment(Money::agnostic(300.0).unwrap()),
+            Principal(Money::agnostic(2000.0).unwrap()),
         )
         .unwrap();
         for installment in schedule {
@@ -243,8 +265,8 @@ mod tests {
         assert_eq!(
             Schedule::with_payment(
                 rate(0.10),
-                Money::agnostic(100.0).unwrap(),
-                Money::agnostic(1000.0).unwrap()
+                Payment(Money::agnostic(100.0).unwrap()),
+                Principal(Money::agnostic(1000.0).unwrap())
             )
             .map(Schedule::count),
             Err(TvmError::Undefined),
@@ -253,9 +275,12 @@ mod tests {
 
     #[test]
     fn a_non_positive_principal_is_an_empty_schedule() {
-        let mut schedule =
-            Schedule::with_payment(rate(0.10), Money::agnostic(100.0).unwrap(), Money::ZERO)
-                .unwrap();
+        let mut schedule = Schedule::with_payment(
+            rate(0.10),
+            Payment(Money::agnostic(100.0).unwrap()),
+            Principal(Money::ZERO),
+        )
+        .unwrap();
         assert!(schedule.next().is_none());
     }
 

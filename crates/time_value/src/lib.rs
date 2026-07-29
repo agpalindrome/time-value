@@ -28,6 +28,13 @@
 //! - [`Cashflows<P>`] is a periodicity-tagged series of cashflows at consecutive
 //!   periods. Discounting a [`Cashflows<P>`] requires a [`Rate<P>`] of the *same*
 //!   periodicity, so a mismatch is a compile error.
+//! - Where an operation takes **two arguments of the same type** that a caller
+//!   could transpose — two [`Money`] amounts, or a rate and a growth rate — the
+//!   ambiguous positions are tagged with a zero-cost *role* newtype:
+//!   [`Payment`], [`PresentValue`], [`FutureValue`], [`Principal`], and
+//!   [`Growth<P>`]. They validate nothing (the inner value already did) and cost
+//!   nothing; they make the swap a compile error
+//!   (`docs/adr/0050-role-newtypes-for-ambiguous-arguments.md`).
 //!
 //! ## Operations
 //!
@@ -118,6 +125,7 @@ mod currency;
 mod money;
 mod periodicity;
 mod rate;
+mod roles;
 mod root;
 
 pub use cashflows::Cashflows;
@@ -127,6 +135,7 @@ pub use currency::Currency;
 pub use money::{FxRate, Money};
 pub use periodicity::{Annual, Daily, Monthly, Periodicity, Quarterly, SemiAnnual, Weekly};
 pub use rate::Rate;
+pub use roles::{FutureValue, Growth, Payment, PresentValue, Principal};
 
 // Operations that need transcendental math (`powf`) are available only with the
 // `std` or `libm` feature (see `docs/adr/0014-transcendental-single-sum-operations.md`).
