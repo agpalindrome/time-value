@@ -4,7 +4,7 @@
 //! result can overflow to a non-finite [`Money`] (see its docs).
 
 use crate::math::{ln, powf};
-use crate::{Money, Period, Periodicity, Rate, TvmError};
+use crate::{FutureValue, Money, Period, Periodicity, PresentValue, Rate, TvmError};
 
 /// The present value of a single `future` amount received `periods` periods from
 /// now, discounted at `rate`: `PV = FV / (1 + r)ⁿ`.
@@ -88,17 +88,33 @@ pub fn future_value<P: Periodicity>(
 /// # Examples
 ///
 /// ```
-/// use time_value::{single_sum, Money, Monthly, Period, Rate};
+/// use time_value::{single_sum, FutureValue, Money, Monthly, Period, PresentValue, Rate};
 ///
 /// // How long for 1000 to reach ~1126.83 at 1% per month? A year.
 /// let n = single_sum::periods(
 ///     Rate::<Monthly>::new(0.01)?,
-///     Money::agnostic(1000.0)?,
-///     Money::agnostic(1126.825)?,
+///     PresentValue(Money::agnostic(1000.0)?),
+///     FutureValue(Money::agnostic(1126.825)?),
 /// )?;
 /// assert!((n.value() - 12.0).abs() < 1e-2);
 /// # Ok::<(), time_value::TvmError>(())
 /// ```
+///
+/// The two amounts are role-tagged, so a transposed call does not compile — and
+/// note that this argument order is *not* the one [`annuity::periods`] takes,
+/// which is exactly why the roles are spelled out (ADR-0050):
+///
+/// ```compile_fail
+/// use time_value::{single_sum, FutureValue, Money, Monthly, PresentValue, Rate};
+///
+/// let _ = single_sum::periods(
+///     Rate::<Monthly>::new(0.01).unwrap(),
+///     FutureValue(Money::agnostic(1126.825).unwrap()), // future where present goes
+///     PresentValue(Money::agnostic(1000.0).unwrap()),
+/// );
+/// ```
+///
+/// [`annuity::periods`]: crate::annuity::periods
 ///
 /// # Errors
 ///
@@ -109,10 +125,10 @@ pub fn future_value<P: Periodicity>(
 ///   rate).
 pub fn periods<P: Periodicity>(
     rate: Rate<P>,
-    present: Money,
-    future: Money,
+    present: PresentValue,
+    future: FutureValue,
 ) -> Result<Period<P>, TvmError> {
-    let ratio = future.value() / present.value();
+    let ratio = future.money().value() / present.money().value();
     if rate.value() == 0.0 || !ratio.is_finite() || ratio <= 0.0 {
         // No growth (rate 0), or a ratio with no real logarithm: `n` is undefined.
         return Err(TvmError::Undefined);
@@ -131,13 +147,13 @@ pub fn periods<P: Periodicity>(
 /// # Examples
 ///
 /// ```
-/// use time_value::{single_sum, Money, Monthly, Period, Rate};
+/// use time_value::{single_sum, FutureValue, Money, Monthly, Period, PresentValue, Rate};
 ///
 /// // What monthly rate grows 1000 to ~1126.83 over a year? About 1%.
 /// let r = single_sum::rate::<Monthly>(
 ///     Period::new(12.0)?,
-///     Money::agnostic(1000.0)?,
-///     Money::agnostic(1126.825)?,
+///     PresentValue(Money::agnostic(1000.0)?),
+///     FutureValue(Money::agnostic(1126.825)?),
 /// )?;
 /// assert!((r.value() - 0.01).abs() < 1e-4);
 /// # Ok::<(), time_value::TvmError>(())
@@ -153,20 +169,23 @@ pub fn periods<P: Periodicity>(
 ///   `≤ −100%`.
 pub fn rate<P: Periodicity>(
     periods: Period<P>,
-    present: Money,
-    future: Money,
+    present: PresentValue,
+    future: FutureValue,
 ) -> Result<Rate<P>, TvmError> {
     if periods.value() <= 0.0 {
         return Err(TvmError::Undefined);
     }
-    let growth = powf(future.value() / present.value(), 1.0 / periods.value());
+    let growth = powf(
+        future.money().value() / present.money().value(),
+        1.0 / periods.value(),
+    );
     Rate::from_operation(growth - 1.0)
 }
 
 #[cfg(test)]
 mod tests {
     use super::{future_value, periods, present_value, rate as solve_rate};
-    use crate::{Money, Monthly, Period, Rate, TvmError};
+    use crate::{FutureValue, Money, Monthly, Period, PresentValue, Rate, TvmError};
 
     /// `no_std`-safe approximate equality (no `f64::abs`).
     fn approx(a: f64, b: f64) -> bool {
@@ -237,7 +256,7 @@ mod tests {
     fn periods_inverts_future_value() {
         let (rate, n, present) = setup();
         let future = future_value(rate, n, present).unwrap();
-        let recovered = periods(rate, present, future).unwrap();
+        let recovered = periods(rate, PresentValue(present), FutureValue(future)).unwrap();
         assert!(approx(recovered.value(), n.value()));
     }
 
@@ -245,7 +264,8 @@ mod tests {
     fn rate_inverts_future_value() {
         let (r, n, present) = setup();
         let future = future_value(r, n, present).unwrap();
-        let recovered = solve_rate::<Monthly>(n, present, future).unwrap();
+        let recovered =
+            solve_rate::<Monthly>(n, PresentValue(present), FutureValue(future)).unwrap();
         assert!(approx(recovered.value(), r.value()));
     }
 
@@ -256,8 +276,8 @@ mod tests {
         assert_eq!(
             periods(
                 rate,
-                Money::agnostic(1000.0).unwrap(),
-                Money::agnostic(2000.0).unwrap()
+                PresentValue(Money::agnostic(1000.0).unwrap()),
+                FutureValue(Money::agnostic(2000.0).unwrap())
             ),
             Err(TvmError::Undefined)
         );
@@ -270,8 +290,8 @@ mod tests {
         assert_eq!(
             periods(
                 rate,
-                Money::agnostic(1000.0).unwrap(),
-                Money::agnostic(500.0).unwrap()
+                PresentValue(Money::agnostic(1000.0).unwrap()),
+                FutureValue(Money::agnostic(500.0).unwrap())
             ),
             Err(TvmError::NegativePeriods)
         );
@@ -282,8 +302,8 @@ mod tests {
         assert_eq!(
             solve_rate::<Monthly>(
                 Period::ZERO,
-                Money::agnostic(1000.0).unwrap(),
-                Money::agnostic(2000.0).unwrap(),
+                PresentValue(Money::agnostic(1000.0).unwrap()),
+                FutureValue(Money::agnostic(2000.0).unwrap()),
             ),
             Err(TvmError::Undefined)
         );

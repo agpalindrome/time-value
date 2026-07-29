@@ -15,7 +15,8 @@ use rmcp::{
 };
 use time_value::{
     amortization, annuity, continuous, single_sum, Annual, Cashflows, ContinuousRate, Currency,
-    DatedCashflow, DatedCashflows, FxRate, Money, Monthly, Period, Rate, TvmError,
+    DatedCashflow, DatedCashflows, FutureValue, FxRate, Growth, Money, Monthly, Payment, Period,
+    PresentValue, Principal, Rate, TvmError,
 };
 use time_value_daycount::{act365_year_fraction, iso_to_day};
 
@@ -258,8 +259,8 @@ impl TimeValueServer {
         let currency = resolve_currency(input.currency);
         let periods = single_sum::periods(
             rate(input.rate)?,
-            money(input.present, currency)?,
-            money(input.future, currency)?,
+            PresentValue(money(input.present, currency)?),
+            FutureValue(money(input.future, currency)?),
         )
         .map_err(tvm)?;
         Ok(Json(ScalarResult::new(periods.value())))
@@ -276,8 +277,8 @@ impl TimeValueServer {
         let currency = resolve_currency(input.currency);
         let solved = single_sum::rate::<Monthly>(
             period(input.periods)?,
-            money(input.present, currency)?,
-            money(input.future, currency)?,
+            PresentValue(money(input.present, currency)?),
+            FutureValue(money(input.future, currency)?),
         )
         .map_err(tvm)?;
         Ok(Json(ScalarResult::new(solved.value())))
@@ -347,10 +348,12 @@ impl TimeValueServer {
     ) -> Result<Json<ScalarResult>, ErrorData> {
         let currency = resolve_currency(input.currency);
         let r = rate(input.rate)?;
-        let pmt = money(input.payment, currency)?;
+        let pmt = Payment(money(input.payment, currency)?);
         let periods = match anchor(input.present, input.future)? {
-            Anchor::Present(p) => annuity::periods(r, pmt, money(p, currency)?),
-            Anchor::Future(f) => annuity::periods_from_future(r, pmt, money(f, currency)?),
+            Anchor::Present(p) => annuity::periods(r, pmt, PresentValue(money(p, currency)?)),
+            Anchor::Future(f) => {
+                annuity::periods_from_future(r, pmt, FutureValue(money(f, currency)?))
+            }
         }
         .map_err(tvm)?;
         Ok(Json(ScalarResult::new(periods.value())))
@@ -366,10 +369,14 @@ impl TimeValueServer {
     ) -> Result<Json<ScalarResult>, ErrorData> {
         let currency = resolve_currency(input.currency);
         let n = period(input.periods)?;
-        let pmt = money(input.payment, currency)?;
+        let pmt = Payment(money(input.payment, currency)?);
         let solved = match anchor(input.present, input.future)? {
-            Anchor::Present(p) => annuity::rate::<Monthly>(n, pmt, money(p, currency)?),
-            Anchor::Future(f) => annuity::rate_from_future::<Monthly>(n, pmt, money(f, currency)?),
+            Anchor::Present(p) => {
+                annuity::rate::<Monthly>(n, pmt, PresentValue(money(p, currency)?))
+            }
+            Anchor::Future(f) => {
+                annuity::rate_from_future::<Monthly>(n, pmt, FutureValue(money(f, currency)?))
+            }
         }
         .map_err(tvm)?;
         Ok(Json(ScalarResult::new(solved.value())))
@@ -400,7 +407,7 @@ impl TimeValueServer {
         let currency = resolve_currency(input.currency);
         let money = annuity::growing_perpetuity(
             rate(input.rate)?,
-            rate(input.growth)?,
+            Growth(rate(input.growth)?),
             money(input.payment, currency)?,
         )
         .map_err(tvm)?;
@@ -418,7 +425,7 @@ impl TimeValueServer {
         let currency = resolve_currency(input.currency);
         let money = annuity::growing_present_value(
             rate(input.rate)?,
-            rate(input.growth)?,
+            Growth(rate(input.growth)?),
             period(input.periods)?,
             money(input.payment, currency)?,
         )
@@ -437,7 +444,7 @@ impl TimeValueServer {
         let currency = resolve_currency(input.currency);
         let money = annuity::growing_future_value(
             rate(input.rate)?,
-            rate(input.growth)?,
+            Growth(rate(input.growth)?),
             period(input.periods)?,
             money(input.payment, currency)?,
         )
@@ -510,7 +517,7 @@ impl TimeValueServer {
         let currency = resolve_currency(input.currency);
         let money = annuity::due::growing_present_value(
             rate(input.rate)?,
-            rate(input.growth)?,
+            Growth(rate(input.growth)?),
             period(input.periods)?,
             money(input.payment, currency)?,
         )
@@ -529,7 +536,7 @@ impl TimeValueServer {
         let currency = resolve_currency(input.currency);
         let money = annuity::due::growing_future_value(
             rate(input.rate)?,
-            rate(input.growth)?,
+            Growth(rate(input.growth)?),
             period(input.periods)?,
             money(input.payment, currency)?,
         )
@@ -620,9 +627,11 @@ impl TimeValueServer {
             (Some(n), None) => {
                 amortization::Schedule::<Monthly>::for_term(r, period(n)?, principal)
             }
-            (None, Some(p)) => {
-                amortization::Schedule::<Monthly>::with_payment(r, money(p, currency)?, principal)
-            }
+            (None, Some(p)) => amortization::Schedule::<Monthly>::with_payment(
+                r,
+                Payment(money(p, currency)?),
+                Principal(principal),
+            ),
             (None, None) => {
                 return Err(ErrorData::invalid_params(
                     "provide either `periods` or `payment`".to_string(),

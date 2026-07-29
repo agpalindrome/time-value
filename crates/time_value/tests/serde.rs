@@ -11,7 +11,7 @@
 use serde_json::{from_str, json, to_value};
 use time_value::{
     amortization::Schedule, Annual, ContinuousRate, Currency, DatedCashflow, FxRate, Money,
-    Monthly, Period, Rate,
+    Monthly, Payment, Period, Principal, Rate,
 };
 
 // ---- Bare numbers: serialize as a plain `f64`, no phantom tag on the wire ---
@@ -105,8 +105,8 @@ fn installment_round_trips() {
     // First row of a level-payment amortization of 1000 at 10%/period paying 500.
     let installment = Schedule::<Monthly>::with_payment(
         Rate::new(0.10).unwrap(),
-        Money::new(500.0, Currency::Usd).unwrap(),
-        Money::new(1000.0, Currency::Usd).unwrap(),
+        Payment(Money::new(500.0, Currency::Usd).unwrap()),
+        Principal(Money::new(1000.0, Currency::Usd).unwrap()),
     )
     .unwrap()
     .next()

@@ -39,7 +39,9 @@
 
 use crate::math::{ln, powf};
 use crate::root::{abs, bracket_and_bisect, relative_tolerance};
-use crate::{Money, Period, Periodicity, Rate, TvmError};
+use crate::{
+    FutureValue, Growth, Money, Payment, Period, Periodicity, PresentValue, Rate, TvmError,
+};
 
 /// Rate magnitude below which the `r → 0` limit is used instead of the closed
 /// form (which is `0/0` at exactly `r = 0` and ill-conditioned near it).
@@ -235,7 +237,7 @@ pub fn payment<P: Periodicity>(
 /// (the present value diverges), or [`TvmError::Overflow`] if the division
 /// overflows on extreme magnitudes (ADR-0021).
 pub fn perpetuity<P: Periodicity>(rate: Rate<P>, payment: Money) -> Result<Money, TvmError> {
-    growing_perpetuity(rate, Rate::from_valid(0.0), payment)
+    growing_perpetuity(rate, Growth(Rate::from_valid(0.0)), payment)
 }
 
 /// The present value of a **growing perpetuity** — a payment at the end of every
@@ -251,12 +253,12 @@ pub fn perpetuity<P: Periodicity>(rate: Rate<P>, payment: Money) -> Result<Money
 /// # Examples
 ///
 /// ```
-/// use time_value::{annuity, Money, Monthly, Rate};
+/// use time_value::{annuity, Growth, Money, Monthly, Rate};
 ///
 /// // First payment 100 at month end, growing 2%/month, discounted at 5%/month.
 /// let pv = annuity::growing_perpetuity(
 ///     Rate::<Monthly>::new(0.05)?,
-///     Rate::<Monthly>::new(0.02)?,
+///     Growth(Rate::new(0.02)?),
 ///     Money::agnostic(100.0)?,
 /// )?;
 /// assert!((pv.value() - 3333.333).abs() < 1e-3); // 100 / (0.05 - 0.02)
@@ -270,7 +272,7 @@ pub fn perpetuity<P: Periodicity>(rate: Rate<P>, payment: Money) -> Result<Money
 /// extreme magnitudes (ADR-0021).
 pub fn growing_perpetuity<P: Periodicity>(
     rate: Rate<P>,
-    growth: Rate<P>,
+    growth: Growth<P>,
     payment: Money,
 ) -> Result<Money, TvmError> {
     if rate.value() <= growth.value() {
@@ -298,17 +300,32 @@ pub fn growing_perpetuity<P: Periodicity>(
 /// # Examples
 ///
 /// ```
-/// use time_value::{annuity, Money, Monthly, Period, Rate};
+/// use time_value::{annuity, Growth, Money, Monthly, Period, Rate};
 ///
 /// // First payment 100 at month end, growing 2%/month for a year, at 5%/month.
 /// let pv = annuity::growing_present_value(
 ///     Rate::<Monthly>::new(0.05)?,
-///     Rate::<Monthly>::new(0.02)?,
+///     Growth(Rate::new(0.02)?),
 ///     Period::new(12.0)?,
 ///     Money::agnostic(100.0)?,
 /// )?;
 /// assert!((pv.value() - 979.318).abs() < 1e-2);
 /// # Ok::<(), time_value::TvmError>(())
+/// ```
+///
+/// Only the *second* rate is a [`Growth`], so discounting at the growth rate and
+/// growing at the discount rate does not compile — the untagged version priced
+/// that swap at `1386.73` without complaint (ADR-0050):
+///
+/// ```compile_fail
+/// use time_value::{annuity, Growth, Money, Monthly, Period, Rate};
+///
+/// let _ = annuity::growing_present_value(
+///     Growth(Rate::<Monthly>::new(0.02).unwrap()), // growth where the discount rate goes
+///     Rate::<Monthly>::new(0.05).unwrap(),
+///     Period::new(12.0).unwrap(),
+///     Money::agnostic(100.0).unwrap(),
+/// );
 /// ```
 ///
 /// # Errors
@@ -317,7 +334,7 @@ pub fn growing_perpetuity<P: Periodicity>(
 /// on extreme rate/growth/period magnitudes (ADR-0021).
 pub fn growing_present_value<P: Periodicity>(
     rate: Rate<P>,
-    growth: Rate<P>,
+    growth: Growth<P>,
     periods: Period<P>,
     payment: Money,
 ) -> Result<Money, TvmError> {
@@ -339,11 +356,11 @@ pub fn growing_present_value<P: Periodicity>(
 /// # Examples
 ///
 /// ```
-/// use time_value::{annuity, Money, Monthly, Period, Rate};
+/// use time_value::{annuity, Growth, Money, Monthly, Period, Rate};
 ///
 /// let fv = annuity::growing_future_value(
 ///     Rate::<Monthly>::new(0.05)?,
-///     Rate::<Monthly>::new(0.02)?,
+///     Growth(Rate::new(0.02)?),
 ///     Period::new(12.0)?,
 ///     Money::agnostic(100.0)?,
 /// )?;
@@ -357,7 +374,7 @@ pub fn growing_present_value<P: Periodicity>(
 /// on extreme rate/growth/period magnitudes (ADR-0021).
 pub fn growing_future_value<P: Periodicity>(
     rate: Rate<P>,
-    growth: Rate<P>,
+    growth: Growth<P>,
     periods: Period<P>,
     payment: Money,
 ) -> Result<Money, TvmError> {
@@ -376,16 +393,30 @@ pub fn growing_future_value<P: Periodicity>(
 /// # Examples
 ///
 /// ```
-/// use time_value::{annuity, Money, Monthly, Rate};
+/// use time_value::{annuity, Money, Monthly, Payment, PresentValue, Rate};
 ///
 /// // How many 100/month payments retire a 1125.508 loan at 1%/month? A year.
 /// let n = annuity::periods(
 ///     Rate::<Monthly>::new(0.01)?,
-///     Money::agnostic(100.0)?,
-///     Money::agnostic(1125.508)?,
+///     Payment(Money::agnostic(100.0)?),
+///     PresentValue(Money::agnostic(1125.508)?),
 /// )?;
 /// assert!((n.value() - 12.0).abs() < 1e-2);
 /// # Ok::<(), time_value::TvmError>(())
+/// ```
+///
+/// The two amounts are role-tagged, so transposing them does not compile —
+/// unlike the untagged version, which answered `0.089` payments as readily as
+/// `12` (ADR-0050):
+///
+/// ```compile_fail
+/// use time_value::{annuity, Money, Monthly, Payment, PresentValue, Rate};
+///
+/// let _ = annuity::periods(
+///     Rate::<Monthly>::new(0.01).unwrap(),
+///     PresentValue(Money::agnostic(1125.508).unwrap()), // the balance, where the payment goes
+///     Payment(Money::agnostic(100.0).unwrap()),
+/// );
 /// ```
 ///
 /// # Errors
@@ -398,9 +429,10 @@ pub fn growing_future_value<P: Periodicity>(
 /// [`NegativePeriods`]: TvmError::NegativePeriods
 pub fn periods<P: Periodicity>(
     rate: Rate<P>,
-    payment: Money,
-    present: Money,
+    payment: Payment,
+    present: PresentValue,
 ) -> Result<Period<P>, TvmError> {
+    let (payment, present) = (payment.money(), present.money());
     let r = rate.value();
     let n = if near_zero(r) {
         if payment.value() == 0.0 {
@@ -427,16 +459,28 @@ pub fn periods<P: Periodicity>(
 /// # Examples
 ///
 /// ```
-/// use time_value::{annuity, Money, Monthly, Rate};
+/// use time_value::{annuity, FutureValue, Money, Monthly, Payment, Rate};
 ///
 /// // How many 100/month contributions reach ~1268.25 at 1%/month? A year.
 /// let n = annuity::periods_from_future(
 ///     Rate::<Monthly>::new(0.01)?,
-///     Money::agnostic(100.0)?,
-///     Money::agnostic(1268.250)?,
+///     Payment(Money::agnostic(100.0)?),
+///     FutureValue(Money::agnostic(1268.250)?),
 /// )?;
 /// assert!((n.value() - 12.0).abs() < 1e-2);
 /// # Ok::<(), time_value::TvmError>(())
+/// ```
+///
+/// The payment and the target value cannot be transposed (ADR-0050):
+///
+/// ```compile_fail
+/// use time_value::{annuity, FutureValue, Money, Monthly, Payment, Rate};
+///
+/// let _ = annuity::periods_from_future(
+///     Rate::<Monthly>::new(0.01).unwrap(),
+///     FutureValue(Money::agnostic(1268.250).unwrap()), // the target, where the payment goes
+///     Payment(Money::agnostic(100.0).unwrap()),
+/// );
 /// ```
 ///
 /// # Errors
@@ -446,9 +490,10 @@ pub fn periods<P: Periodicity>(
 /// solved `n` is negative.
 pub fn periods_from_future<P: Periodicity>(
     rate: Rate<P>,
-    payment: Money,
-    future: Money,
+    payment: Payment,
+    future: FutureValue,
 ) -> Result<Period<P>, TvmError> {
+    let (payment, future) = (payment.money(), future.money());
     let r = rate.value();
     let n = if near_zero(r) {
         if payment.value() == 0.0 {
@@ -477,13 +522,13 @@ pub fn periods_from_future<P: Periodicity>(
 /// # Examples
 ///
 /// ```
-/// use time_value::{annuity, Money, Monthly, Period, Rate};
+/// use time_value::{annuity, Money, Monthly, Payment, Period, PresentValue, Rate};
 ///
 /// // What monthly rate amortises 1125.508 with 12 payments of 100? About 1%.
 /// let r = annuity::rate::<Monthly>(
 ///     Period::new(12.0)?,
-///     Money::agnostic(100.0)?,
-///     Money::agnostic(1125.508)?,
+///     Payment(Money::agnostic(100.0)?),
+///     PresentValue(Money::agnostic(1125.508)?),
 /// )?;
 /// assert!((r.value() - 0.01).abs() < 1e-4);
 /// # Ok::<(), time_value::TvmError>(())
@@ -497,13 +542,13 @@ pub fn periods_from_future<P: Periodicity>(
 /// domain or non-finite.
 pub fn rate<P: Periodicity>(
     periods: Period<P>,
-    payment: Money,
-    present: Money,
+    payment: Payment,
+    present: PresentValue,
 ) -> Result<Rate<P>, TvmError> {
     solve_rate(
         periods.value(),
-        payment.value(),
-        present.value(),
+        payment.money().value(),
+        present.money().value(),
         present_value_factor,
     )
 }
@@ -519,13 +564,13 @@ pub fn rate<P: Periodicity>(
 /// # Examples
 ///
 /// ```
-/// use time_value::{annuity, Money, Monthly, Period, Rate};
+/// use time_value::{annuity, FutureValue, Money, Monthly, Payment, Period, Rate};
 ///
 /// // What monthly rate accumulates 12 payments of 100 to ~1268.25? About 1%.
 /// let r = annuity::rate_from_future::<Monthly>(
 ///     Period::new(12.0)?,
-///     Money::agnostic(100.0)?,
-///     Money::agnostic(1268.250)?,
+///     Payment(Money::agnostic(100.0)?),
+///     FutureValue(Money::agnostic(1268.250)?),
 /// )?;
 /// assert!((r.value() - 0.01).abs() < 1e-4);
 /// # Ok::<(), time_value::TvmError>(())
@@ -536,13 +581,13 @@ pub fn rate<P: Periodicity>(
 /// As [`rate`].
 pub fn rate_from_future<P: Periodicity>(
     periods: Period<P>,
-    payment: Money,
-    future: Money,
+    payment: Payment,
+    future: FutureValue,
 ) -> Result<Rate<P>, TvmError> {
     solve_rate(
         periods.value(),
-        payment.value(),
-        future.value(),
+        payment.money().value(),
+        future.money().value(),
         future_value_factor,
     )
 }
@@ -580,7 +625,7 @@ pub mod due {
         future_value_factor, growing_future_value_factor, growing_present_value_factor,
         present_value_factor,
     };
-    use crate::{Money, Period, Periodicity, Rate, TvmError};
+    use crate::{Growth, Money, Period, Periodicity, Rate, TvmError};
 
     /// The present value of an annuity-due that pays `payment` at the *start* of
     /// each of `periods` periods, discounted at `rate`.
@@ -703,12 +748,12 @@ pub mod due {
     /// # Examples
     ///
     /// ```
-    /// use time_value::{annuity, Money, Monthly, Period, Rate};
+    /// use time_value::{annuity, Growth, Money, Monthly, Period, Rate};
     ///
     /// // First payment 100 at month start, growing 2%/month for a year, at 5%.
     /// let pv = annuity::due::growing_present_value(
     ///     Rate::<Monthly>::new(0.05)?,
-    ///     Rate::<Monthly>::new(0.02)?,
+    ///     Growth(Rate::new(0.02)?),
     ///     Period::new(12.0)?,
     ///     Money::agnostic(100.0)?,
     /// )?;
@@ -722,7 +767,7 @@ pub mod due {
     /// value on extreme rate/growth/period magnitudes (ADR-0021).
     pub fn growing_present_value<P: Periodicity>(
         rate: Rate<P>,
-        growth: Rate<P>,
+        growth: Growth<P>,
         periods: Period<P>,
         payment: Money,
     ) -> Result<Money, TvmError> {
@@ -741,11 +786,11 @@ pub mod due {
     /// # Examples
     ///
     /// ```
-    /// use time_value::{annuity, Money, Monthly, Period, Rate};
+    /// use time_value::{annuity, Growth, Money, Monthly, Period, Rate};
     ///
     /// let fv = annuity::due::growing_future_value(
     ///     Rate::<Monthly>::new(0.05)?,
-    ///     Rate::<Monthly>::new(0.02)?,
+    ///     Growth(Rate::new(0.02)?),
     ///     Period::new(12.0)?,
     ///     Money::agnostic(100.0)?,
     /// )?;
@@ -759,7 +804,7 @@ pub mod due {
     /// value on extreme rate/growth/period magnitudes (ADR-0021).
     pub fn growing_future_value<P: Periodicity>(
         rate: Rate<P>,
-        growth: Rate<P>,
+        growth: Growth<P>,
         periods: Period<P>,
         payment: Money,
     ) -> Result<Money, TvmError> {
@@ -771,7 +816,9 @@ pub mod due {
 
 #[cfg(test)]
 mod tests {
-    use crate::{annuity, Money, Monthly, Period, Rate, TvmError};
+    use crate::{
+        annuity, FutureValue, Growth, Money, Monthly, Payment, Period, PresentValue, Rate, TvmError,
+    };
 
     /// `no_std`-safe approximate equality (no `f64::abs`).
     fn approx(a: f64, b: f64, tolerance: f64) -> bool {
@@ -781,6 +828,10 @@ mod tests {
 
     fn rate(r: f64) -> Rate<Monthly> {
         Rate::<Monthly>::new(r).unwrap()
+    }
+
+    fn growth(g: f64) -> Growth<Monthly> {
+        Growth(rate(g))
     }
 
     #[test]
@@ -910,7 +961,7 @@ mod tests {
     fn perpetuity_is_the_zero_growth_growing_perpetuity() {
         let pv = annuity::perpetuity(rate(0.05), Money::agnostic(100.0).unwrap()).unwrap();
         let grown =
-            annuity::growing_perpetuity(rate(0.05), rate(0.0), Money::agnostic(100.0).unwrap())
+            annuity::growing_perpetuity(rate(0.05), growth(0.0), Money::agnostic(100.0).unwrap())
                 .unwrap();
         assert!(approx(pv.value(), grown.value(), 1e-9));
     }
@@ -919,7 +970,7 @@ mod tests {
     fn growing_perpetuity_discounts_by_the_spread() {
         // 100 / (0.05 - 0.02) = 3333.333...
         let pv =
-            annuity::growing_perpetuity(rate(0.05), rate(0.02), Money::agnostic(100.0).unwrap())
+            annuity::growing_perpetuity(rate(0.05), growth(0.02), Money::agnostic(100.0).unwrap())
                 .unwrap();
         assert!(approx(pv.value(), 3_333.333_333_333_333, 1e-6));
     }
@@ -942,12 +993,12 @@ mod tests {
         let payment = Money::agnostic(100.0).unwrap();
         // r = g: an infinity from division by zero.
         assert_eq!(
-            annuity::growing_perpetuity(rate(0.03), rate(0.03), payment),
+            annuity::growing_perpetuity(rate(0.03), growth(0.03), payment),
             Err(TvmError::DivergentPerpetuity),
         );
         // r < g: a finite but meaningless value, still rejected.
         assert_eq!(
-            annuity::growing_perpetuity(rate(0.02), rate(0.05), payment),
+            annuity::growing_perpetuity(rate(0.02), growth(0.05), payment),
             Err(TvmError::DivergentPerpetuity),
         );
     }
@@ -957,7 +1008,8 @@ mod tests {
         let periods = Period::new(12.0).unwrap();
         let payment = Money::agnostic(100.0).unwrap();
         let present = annuity::present_value(rate(0.01), periods, payment).unwrap();
-        let recovered = annuity::periods(rate(0.01), payment, present).unwrap();
+        let recovered =
+            annuity::periods(rate(0.01), Payment(payment), PresentValue(present)).unwrap();
         assert!(approx(recovered.value(), periods.value(), 1e-6));
     }
 
@@ -966,7 +1018,9 @@ mod tests {
         let periods = Period::new(12.0).unwrap();
         let payment = Money::agnostic(100.0).unwrap();
         let future = annuity::future_value(rate(0.01), periods, payment).unwrap();
-        let recovered = annuity::periods_from_future(rate(0.01), payment, future).unwrap();
+        let recovered =
+            annuity::periods_from_future(rate(0.01), Payment(payment), FutureValue(future))
+                .unwrap();
         assert!(approx(recovered.value(), periods.value(), 1e-6));
     }
 
@@ -975,8 +1029,8 @@ mod tests {
         // At r = 0, PV = PMT·n, so n = PV / PMT.
         let n = annuity::periods(
             rate(0.0),
-            Money::agnostic(100.0).unwrap(),
-            Money::agnostic(1200.0).unwrap(),
+            Payment(Money::agnostic(100.0).unwrap()),
+            PresentValue(Money::agnostic(1200.0).unwrap()),
         )
         .unwrap();
         assert!(approx(n.value(), 12.0, 1e-9));
@@ -989,8 +1043,8 @@ mod tests {
         assert_eq!(
             annuity::periods(
                 rate(0.05),
-                Money::agnostic(100.0).unwrap(),
-                Money::agnostic(10_000.0).unwrap(),
+                Payment(Money::agnostic(100.0).unwrap()),
+                PresentValue(Money::agnostic(10_000.0).unwrap()),
             ),
             Err(TvmError::Undefined)
         );
@@ -1001,7 +1055,8 @@ mod tests {
         let periods = Period::new(12.0).unwrap();
         let payment = Money::agnostic(100.0).unwrap();
         let present = annuity::present_value(rate(0.01), periods, payment).unwrap();
-        let recovered = annuity::rate::<Monthly>(periods, payment, present).unwrap();
+        let recovered =
+            annuity::rate::<Monthly>(periods, Payment(payment), PresentValue(present)).unwrap();
         assert!(approx(recovered.value(), 0.01, 1e-6));
     }
 
@@ -1010,7 +1065,9 @@ mod tests {
         let periods = Period::new(12.0).unwrap();
         let payment = Money::agnostic(100.0).unwrap();
         let future = annuity::future_value(rate(0.01), periods, payment).unwrap();
-        let recovered = annuity::rate_from_future::<Monthly>(periods, payment, future).unwrap();
+        let recovered =
+            annuity::rate_from_future::<Monthly>(periods, Payment(payment), FutureValue(future))
+                .unwrap();
         assert!(approx(recovered.value(), 0.01, 1e-6));
     }
 
@@ -1020,7 +1077,8 @@ mod tests {
         let periods = Period::new(12.0).unwrap();
         let payment = Money::agnostic(100.0).unwrap();
         let present = annuity::present_value(rate(-0.02), periods, payment).unwrap();
-        let recovered = annuity::rate::<Monthly>(periods, payment, present).unwrap();
+        let recovered =
+            annuity::rate::<Monthly>(periods, Payment(payment), PresentValue(present)).unwrap();
         assert!(approx(recovered.value(), -0.02, 1e-6));
     }
 
@@ -1031,8 +1089,8 @@ mod tests {
         assert_eq!(
             annuity::rate::<Monthly>(
                 Period::new(12.0).unwrap(),
-                Money::agnostic(100.0).unwrap(),
-                Money::agnostic(-1000.0).unwrap(),
+                Payment(Money::agnostic(100.0).unwrap()),
+                PresentValue(Money::agnostic(-1000.0).unwrap()),
             ),
             Err(TvmError::SolveDidNotConverge)
         );
@@ -1042,7 +1100,7 @@ mod tests {
     /// term-by-term sum of the payments themselves — an independent reference, so
     /// a mistranscribed factor cannot agree with it by construction.
     mod growing {
-        use super::{approx, rate};
+        use super::{approx, growth, rate};
         use crate::{annuity, Currency, Money, Period, TvmError};
 
         /// `Σ PMT·(1+g)^(k−1) / (1+r)^k` for `k = 1..=n` — the ordinary growing
@@ -1079,7 +1137,7 @@ mod tests {
         fn present_value_matches_a_direct_summation() {
             let pv = annuity::growing_present_value(
                 rate(0.05),
-                rate(0.02),
+                growth(0.02),
                 Period::new(12.0).unwrap(),
                 Money::agnostic(100.0).unwrap(),
             )
@@ -1095,7 +1153,7 @@ mod tests {
         fn future_value_matches_a_direct_summation() {
             let fv = annuity::growing_future_value(
                 rate(0.05),
-                rate(0.02),
+                growth(0.02),
                 Period::new(12.0).unwrap(),
                 Money::agnostic(100.0).unwrap(),
             )
@@ -1116,7 +1174,7 @@ mod tests {
             let periods = Period::new(10.0).unwrap();
             let payment = Money::agnostic(100.0).unwrap();
 
-            let pv = annuity::growing_present_value(rate(0.05), rate(0.05), periods, payment)
+            let pv = annuity::growing_present_value(rate(0.05), growth(0.05), periods, payment)
                 .unwrap()
                 .value();
             assert!(approx(pv, 10.0 * 100.0 / 1.05, 1e-9));
@@ -1126,7 +1184,7 @@ mod tests {
                 1e-9,
             ));
 
-            let fv = annuity::growing_future_value(rate(0.05), rate(0.05), periods, payment)
+            let fv = annuity::growing_future_value(rate(0.05), growth(0.05), periods, payment)
                 .unwrap()
                 .value();
             assert!(approx(
@@ -1144,7 +1202,7 @@ mod tests {
         fn growth_above_the_rate_is_priced_not_rejected() {
             let pv = annuity::growing_present_value(
                 rate(0.02),
-                rate(0.05),
+                growth(0.05),
                 Period::new(12.0).unwrap(),
                 Money::agnostic(100.0).unwrap(),
             )
@@ -1158,7 +1216,7 @@ mod tests {
             assert_eq!(
                 annuity::growing_perpetuity(
                     rate(0.02),
-                    rate(0.05),
+                    growth(0.05),
                     Money::agnostic(100.0).unwrap()
                 ),
                 Err(TvmError::DivergentPerpetuity),
@@ -1171,21 +1229,21 @@ mod tests {
             let payment = Money::agnostic(100.0).unwrap();
 
             let ordinary_present =
-                annuity::growing_present_value(rate(0.05), rate(0.02), periods, payment)
+                annuity::growing_present_value(rate(0.05), growth(0.02), periods, payment)
                     .unwrap()
                     .value();
             let due_present =
-                annuity::due::growing_present_value(rate(0.05), rate(0.02), periods, payment)
+                annuity::due::growing_present_value(rate(0.05), growth(0.02), periods, payment)
                     .unwrap()
                     .value();
             assert!(approx(due_present, ordinary_present * 1.05, 1e-9));
 
             let ordinary_future =
-                annuity::growing_future_value(rate(0.05), rate(0.02), periods, payment)
+                annuity::growing_future_value(rate(0.05), growth(0.02), periods, payment)
                     .unwrap()
                     .value();
             let due_future =
-                annuity::due::growing_future_value(rate(0.05), rate(0.02), periods, payment)
+                annuity::due::growing_future_value(rate(0.05), growth(0.02), periods, payment)
                     .unwrap()
                     .value();
             assert!(approx(due_future, ordinary_future * 1.05, 1e-9));
@@ -1198,13 +1256,13 @@ mod tests {
             let payment = Money::new(100.0, Currency::Usd).unwrap();
             let periods = Period::new(12.0).unwrap();
             assert_eq!(
-                annuity::growing_present_value(rate(0.05), rate(0.02), periods, payment)
+                annuity::growing_present_value(rate(0.05), growth(0.02), periods, payment)
                     .unwrap()
                     .currency(),
                 Currency::Usd,
             );
             assert_eq!(
-                annuity::due::growing_future_value(rate(0.05), rate(0.02), periods, payment)
+                annuity::due::growing_future_value(rate(0.05), growth(0.02), periods, payment)
                     .unwrap()
                     .currency(),
                 Currency::Usd,
@@ -1218,14 +1276,14 @@ mod tests {
         fn a_zero_term_is_worth_nothing() {
             let payment = Money::agnostic(100.0).unwrap();
             assert!(approx(
-                annuity::growing_present_value(rate(0.05), rate(0.02), Period::ZERO, payment)
+                annuity::growing_present_value(rate(0.05), growth(0.02), Period::ZERO, payment)
                     .unwrap()
                     .value(),
                 0.0,
                 1e-12,
             ));
             assert!(approx(
-                annuity::growing_future_value(rate(0.05), rate(0.02), Period::ZERO, payment)
+                annuity::growing_future_value(rate(0.05), growth(0.02), Period::ZERO, payment)
                     .unwrap()
                     .value(),
                 0.0,

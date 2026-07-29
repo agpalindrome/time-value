@@ -18,7 +18,7 @@
 //! transcendental-math feature is on.
 
 use proptest::prelude::*;
-use time_value::{amortization::Schedule, Cashflows, Money, Monthly, Rate};
+use time_value::{amortization::Schedule, Cashflows, Money, Monthly, Payment, Principal, Rate};
 
 /// Absolute closeness check, mirroring the crate's own `no_std`-safe tolerance
 /// helper (`f64::abs` is not in `core`).
@@ -41,8 +41,8 @@ fn close(a: f64, b: f64, tolerance: f64) -> bool {
 fn amortizing_schedule(rate: f64, principal: f64, slice: f64) -> Schedule<Monthly> {
     Schedule::with_payment(
         Rate::<Monthly>::new(rate).unwrap(),
-        Money::agnostic(principal * (rate + slice)).unwrap(),
-        Money::agnostic(principal).unwrap(),
+        Payment(Money::agnostic(principal * (rate + slice)).unwrap()),
+        Principal(Money::agnostic(principal).unwrap()),
     )
     .unwrap()
 }
@@ -338,14 +338,14 @@ proptest! {
         rate in 0.001f64..1.0,
         periods in 1.0f64..120.0,
     ) {
-        use time_value::{single_sum, Period};
+        use time_value::{single_sum, FutureValue, Period, PresentValue};
 
         let r = Rate::<Monthly>::new(rate).unwrap();
         let present = Money::agnostic(present).unwrap();
         let n = Period::new(periods).unwrap();
 
         let future = single_sum::future_value(r, n, present).unwrap();
-        let recovered = single_sum::periods(r, present, future).unwrap();
+        let recovered = single_sum::periods(r, PresentValue(present), FutureValue(future)).unwrap();
         prop_assert!(close(recovered.value(), periods, 1e-6 * periods));
     }
 
@@ -358,14 +358,14 @@ proptest! {
         rate in -0.5f64..1.0,
         periods in 1.0f64..120.0,
     ) {
-        use time_value::{single_sum, Period};
+        use time_value::{single_sum, FutureValue, Period, PresentValue};
 
         let r = Rate::<Monthly>::new(rate).unwrap();
         let present = Money::agnostic(present).unwrap();
         let n = Period::new(periods).unwrap();
 
         let future = single_sum::future_value(r, n, present).unwrap();
-        let recovered = single_sum::rate::<Monthly>(n, present, future).unwrap();
+        let recovered = single_sum::rate::<Monthly>(n, PresentValue(present), FutureValue(future)).unwrap();
         prop_assert!(close(1.0 + recovered.value(), 1.0 + rate, 1e-6 * (1.0 + rate)));
     }
 
@@ -385,14 +385,14 @@ proptest! {
         rate in 0.001f64..0.2,
         periods in 1.0f64..60.0,
     ) {
-        use time_value::{annuity, Period};
+        use time_value::{annuity, Payment, Period, PresentValue};
 
         let r = Rate::<Monthly>::new(rate).unwrap();
         let payment = Money::agnostic(payment).unwrap();
         let n = Period::new(periods).unwrap();
 
         let present = annuity::present_value(r, n, payment).unwrap();
-        let recovered = annuity::periods(r, payment, present).unwrap();
+        let recovered = annuity::periods(r, Payment(payment), PresentValue(present)).unwrap();
         prop_assert!(close(recovered.value(), periods, 1e-6 * periods));
     }
 
@@ -405,14 +405,14 @@ proptest! {
         rate in -0.5f64..1.0,
         periods in 1.0f64..120.0,
     ) {
-        use time_value::{annuity, Period};
+        use time_value::{annuity, Payment, Period, PresentValue};
 
         let r = Rate::<Monthly>::new(rate).unwrap();
         let payment = Money::agnostic(payment).unwrap();
         let n = Period::new(periods).unwrap();
 
         let present = annuity::present_value(r, n, payment).unwrap();
-        let recovered = annuity::rate::<Monthly>(n, payment, present).unwrap();
+        let recovered = annuity::rate::<Monthly>(n, Payment(payment), PresentValue(present)).unwrap();
         prop_assert!(close(1.0 + recovered.value(), 1.0 + rate, 1e-6 * (1.0 + rate)));
     }
 
@@ -553,10 +553,10 @@ proptest! {
         rate in -0.5f64..1.0,
         periods in 1.0f64..120.0,
     ) {
-        use time_value::{annuity, Period};
+        use time_value::{annuity, Growth, Period};
 
         let r = Rate::<Monthly>::new(rate).unwrap();
-        let g = Rate::<Monthly>::new(0.0).unwrap();
+        let g = Growth(Rate::<Monthly>::new(0.0).unwrap());
         let n = Period::new(periods).unwrap();
         let payment = Money::agnostic(payment).unwrap();
 
@@ -581,10 +581,10 @@ proptest! {
         growth in -0.5f64..0.5,
         periods in 1.0f64..40.0,
     ) {
-        use time_value::{annuity, Period};
+        use time_value::{annuity, Growth, Period};
 
         let r = Rate::<Monthly>::new(rate).unwrap();
-        let g = Rate::<Monthly>::new(growth).unwrap();
+        let g = Growth(Rate::<Monthly>::new(growth).unwrap());
         let n = Period::new(periods).unwrap();
         let payment = Money::agnostic(payment).unwrap();
 
@@ -608,9 +608,9 @@ proptest! {
         growth in -0.2f64..0.2,
         spread in 0.01f64..0.5,
     ) {
-        use time_value::{annuity, Period};
+        use time_value::{annuity, Growth, Period};
 
-        let g = Rate::<Monthly>::new(growth).unwrap();
+        let g = Growth(Rate::<Monthly>::new(growth).unwrap());
         let r = Rate::<Monthly>::new(growth + spread).unwrap();
         let n = Period::new(2000.0).unwrap();
         let payment = Money::agnostic(payment).unwrap();
@@ -630,10 +630,10 @@ proptest! {
         growth in -0.5f64..0.5,
         periods in 1.0f64..40.0,
     ) {
-        use time_value::{annuity, Period};
+        use time_value::{annuity, Growth, Period};
 
         let r = Rate::<Monthly>::new(rate).unwrap();
-        let g = Rate::<Monthly>::new(growth).unwrap();
+        let g = Growth(Rate::<Monthly>::new(growth).unwrap());
         let n = Period::new(periods).unwrap();
         let payment = Money::agnostic(payment).unwrap();
 
