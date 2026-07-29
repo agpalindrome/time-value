@@ -237,8 +237,8 @@ fn single_sum_output_conforms_to_declared_schema() {
     ]);
 }
 
-/// The annuity family: ordinary, the NPER/RATE solves, perpetuities, and the
-/// annuity-due forms.
+/// The annuity family: ordinary, the NPER/RATE solves, perpetuities, the
+/// annuity-due forms, and the finite growing forms (ADR-0048).
 #[test]
 fn annuity_output_conforms_to_declared_schema() {
     check_conformance(&[
@@ -281,6 +281,22 @@ fn annuity_output_conforms_to_declared_schema() {
         Case {
             tool: "annuity_due_payment",
             args: json!({"rate":0.01,"periods":12,"present":1000}),
+        },
+        Case {
+            tool: "annuity_growing_present_value",
+            args: json!({"rate":0.05,"growth":0.02,"periods":12,"payment":100,"currency":"EUR"}),
+        },
+        Case {
+            tool: "annuity_growing_future_value",
+            args: json!({"rate":0.05,"growth":0.02,"periods":12,"payment":100}),
+        },
+        Case {
+            tool: "annuity_growing_due_present_value",
+            args: json!({"rate":0.05,"growth":0.02,"periods":12,"payment":100}),
+        },
+        Case {
+            tool: "annuity_growing_due_future_value",
+            args: json!({"rate":0.05,"growth":0.02,"periods":12,"payment":100}),
         },
     ]);
 }
