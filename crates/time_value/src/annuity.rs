@@ -7,6 +7,12 @@
 //! factors scaled by `(1 + r)`. [`perpetuity`] and [`growing_perpetuity`] give
 //! the present value of a payment that continues forever.
 //!
+//! A payment that *grows* each period is priced by
+//! [`growing_present_value`] / [`growing_future_value`] and their [`due`]
+//! counterparts (ADR-0048). Unlike a growing perpetuity, a finite growing annuity
+//! converges for every rate and growth pair, so `r ≤ g` is priced rather than
+//! rejected; at `r = g` the factors take their limit, as they do at `r = 0`.
+//!
 //! Every function takes an interest `rate`; the dated ones also take a number of
 //! `periods`. They are available with the `std` or `libm` feature, like the
 //! single-sum operations (`docs/adr/0014-transcendental-single-sum-operations.md`),
@@ -60,6 +66,39 @@ fn future_value_factor(rate: f64, periods: f64) -> f64 {
         periods
     } else {
         (powf(1.0 + rate, periods) - 1.0) / rate
+    }
+}
+
+/// The present-value factor for a **growing** annuity,
+/// `(1 - ((1 + g)/(1 + r))ⁿ) / (r - g)`, taking the limit `n / (1 + r)` as
+/// `g → r` (ADR-0048).
+///
+/// The limit is taken on the *spread* `r - g` rather than on `r` alone: the
+/// closed form is `0/0` when the discount rate exactly matches the growth rate
+/// (every payment then discounts to the same present amount), and
+/// ill-conditioned near it — the same bargain [`present_value_factor`] makes at
+/// `r ≈ 0`, which remains the `g = 0` case of this one.
+fn growing_present_value_factor(rate: f64, growth: f64, periods: f64) -> f64 {
+    let spread = rate - growth;
+    if near_zero(spread) {
+        periods / (1.0 + rate)
+    } else {
+        (1.0 - powf((1.0 + growth) / (1.0 + rate), periods)) / spread
+    }
+}
+
+/// The future-value factor for a **growing** annuity,
+/// `((1 + r)ⁿ - (1 + g)ⁿ) / (r - g)`, taking the limit `n · (1 + r)ⁿ⁻¹` as
+/// `g → r` (ADR-0048).
+///
+/// This is [`growing_present_value_factor`] compounded forward by `(1 + r)ⁿ`,
+/// and reduces to [`future_value_factor`] at `g = 0`.
+fn growing_future_value_factor(rate: f64, growth: f64, periods: f64) -> f64 {
+    let spread = rate - growth;
+    if near_zero(spread) {
+        periods * powf(1.0 + rate, periods - 1.0)
+    } else {
+        (powf(1.0 + rate, periods) - powf(1.0 + growth, periods)) / spread
     }
 }
 
@@ -239,6 +278,92 @@ pub fn growing_perpetuity<P: Periodicity>(
     }
     Money::from_operation(
         payment.value() / (rate.value() - growth.value()),
+        payment.currency(),
+    )
+}
+
+/// The present value of a **growing annuity** — `payment` at the end of the first
+/// period, growing at `growth` each period, for `periods` periods — discounted at
+/// `rate` (ADR-0048).
+///
+/// `PV = PMT · (1 - ((1 + g)/(1 + r))ⁿ) / (r - g)`, or `PV = PMT · n / (1 + r)`
+/// when `r = g`. `PMT` is the *first* payment, so the `k`-th is `PMT · (1 + g)^(k-1)`.
+///
+/// Unlike [`growing_perpetuity`], this converges for **every** rate and growth
+/// pair — a finite sum of finite terms — so `r ≤ g` is priced, not rejected. At
+/// `r = g` every payment discounts to the same amount and the present value is
+/// simply `n` of them. It is the `g = 0` case that recovers [`present_value`], and
+/// [`growing_perpetuity`] that is its `n → ∞` limit (when `r > g`).
+///
+/// # Examples
+///
+/// ```
+/// use time_value::{annuity, Money, Monthly, Period, Rate};
+///
+/// // First payment 100 at month end, growing 2%/month for a year, at 5%/month.
+/// let pv = annuity::growing_present_value(
+///     Rate::<Monthly>::new(0.05)?,
+///     Rate::<Monthly>::new(0.02)?,
+///     Period::new(12.0)?,
+///     Money::agnostic(100.0)?,
+/// )?;
+/// assert!((pv.value() - 979.318).abs() < 1e-2);
+/// # Ok::<(), time_value::TvmError>(())
+/// ```
+///
+/// # Errors
+///
+/// [`TvmError::Overflow`] if the discounted sum overflows to a non-finite value
+/// on extreme rate/growth/period magnitudes (ADR-0021).
+pub fn growing_present_value<P: Periodicity>(
+    rate: Rate<P>,
+    growth: Rate<P>,
+    periods: Period<P>,
+    payment: Money,
+) -> Result<Money, TvmError> {
+    Money::from_operation(
+        payment.value()
+            * growing_present_value_factor(rate.value(), growth.value(), periods.value()),
+        payment.currency(),
+    )
+}
+
+/// The future value of a **growing annuity** — `payment` at the end of the first
+/// period, growing at `growth` each period, for `periods` periods — compounded at
+/// `rate` (ADR-0048).
+///
+/// `FV = PMT · ((1 + r)ⁿ - (1 + g)ⁿ) / (r - g)`, or `FV = PMT · n · (1 + r)ⁿ⁻¹`
+/// when `r = g`. This is [`growing_present_value`] compounded forward by
+/// `(1 + r)ⁿ`, and recovers [`future_value`] at `g = 0`.
+///
+/// # Examples
+///
+/// ```
+/// use time_value::{annuity, Money, Monthly, Period, Rate};
+///
+/// let fv = annuity::growing_future_value(
+///     Rate::<Monthly>::new(0.05)?,
+///     Rate::<Monthly>::new(0.02)?,
+///     Period::new(12.0)?,
+///     Money::agnostic(100.0)?,
+/// )?;
+/// assert!((fv.value() - 1758.715).abs() < 1e-2);
+/// # Ok::<(), time_value::TvmError>(())
+/// ```
+///
+/// # Errors
+///
+/// [`TvmError::Overflow`] if the compounded sum overflows to a non-finite value
+/// on extreme rate/growth/period magnitudes (ADR-0021).
+pub fn growing_future_value<P: Periodicity>(
+    rate: Rate<P>,
+    growth: Rate<P>,
+    periods: Period<P>,
+    payment: Money,
+) -> Result<Money, TvmError> {
+    Money::from_operation(
+        payment.value()
+            * growing_future_value_factor(rate.value(), growth.value(), periods.value()),
         payment.currency(),
     )
 }
@@ -451,7 +576,10 @@ fn solve_rate<P: Periodicity>(
 /// inverts `present_value` here just as the ordinary `payment` inverts the
 /// ordinary `present_value` (`docs/adr/0015-annuities.md`).
 pub mod due {
-    use super::{future_value_factor, present_value_factor};
+    use super::{
+        future_value_factor, growing_future_value_factor, growing_present_value_factor,
+        present_value_factor,
+    };
     use crate::{Money, Period, Periodicity, Rate, TvmError};
 
     /// The present value of an annuity-due that pays `payment` at the *start* of
@@ -558,6 +686,86 @@ pub mod due {
         }
         let factor = present_value_factor(rate.value(), periods.value()) * (1.0 + rate.value());
         Money::from_operation(present.value() / factor, present.currency())
+    }
+
+    /// The present value of a **growing annuity-due** — `payment` at the *start*
+    /// of the first period, growing at `growth` each period, for `periods`
+    /// periods — discounted at `rate` (ADR-0048).
+    ///
+    /// `PV = PMT · (1 + r) · (1 - ((1 + g)/(1 + r))ⁿ) / (r - g)`, or
+    /// `PV = PMT · n` when `r = g`. As everywhere in this module, the due factor
+    /// is the ordinary one scaled by `(1 + r)`; here that scaling cancels the
+    /// `1 / (1 + r)` in the `r = g` limit, leaving `n` undiscounted payments.
+    ///
+    /// Like [`growing_present_value`](super::growing_present_value), this prices
+    /// every rate and growth pair — `r ≤ g` is not rejected.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use time_value::{annuity, Money, Monthly, Period, Rate};
+    ///
+    /// // First payment 100 at month start, growing 2%/month for a year, at 5%.
+    /// let pv = annuity::due::growing_present_value(
+    ///     Rate::<Monthly>::new(0.05)?,
+    ///     Rate::<Monthly>::new(0.02)?,
+    ///     Period::new(12.0)?,
+    ///     Money::agnostic(100.0)?,
+    /// )?;
+    /// assert!((pv.value() - 1028.284).abs() < 1e-2); // ordinary 979.318 × 1.05
+    /// # Ok::<(), time_value::TvmError>(())
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// [`TvmError::Overflow`] if the discounted sum overflows to a non-finite
+    /// value on extreme rate/growth/period magnitudes (ADR-0021).
+    pub fn growing_present_value<P: Periodicity>(
+        rate: Rate<P>,
+        growth: Rate<P>,
+        periods: Period<P>,
+        payment: Money,
+    ) -> Result<Money, TvmError> {
+        let factor = growing_present_value_factor(rate.value(), growth.value(), periods.value())
+            * (1.0 + rate.value());
+        Money::from_operation(payment.value() * factor, payment.currency())
+    }
+
+    /// The future value of a **growing annuity-due** — `payment` at the *start*
+    /// of the first period, growing at `growth` each period, for `periods`
+    /// periods — compounded at `rate` (ADR-0048).
+    ///
+    /// `FV = PMT · (1 + r) · ((1 + r)ⁿ - (1 + g)ⁿ) / (r - g)`, or
+    /// `FV = PMT · n · (1 + r)ⁿ` when `r = g`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use time_value::{annuity, Money, Monthly, Period, Rate};
+    ///
+    /// let fv = annuity::due::growing_future_value(
+    ///     Rate::<Monthly>::new(0.05)?,
+    ///     Rate::<Monthly>::new(0.02)?,
+    ///     Period::new(12.0)?,
+    ///     Money::agnostic(100.0)?,
+    /// )?;
+    /// assert!((fv.value() - 1846.651).abs() < 1e-2); // ordinary 1758.715 × 1.05
+    /// # Ok::<(), time_value::TvmError>(())
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// [`TvmError::Overflow`] if the compounded sum overflows to a non-finite
+    /// value on extreme rate/growth/period magnitudes (ADR-0021).
+    pub fn growing_future_value<P: Periodicity>(
+        rate: Rate<P>,
+        growth: Rate<P>,
+        periods: Period<P>,
+        payment: Money,
+    ) -> Result<Money, TvmError> {
+        let factor = growing_future_value_factor(rate.value(), growth.value(), periods.value())
+            * (1.0 + rate.value());
+        Money::from_operation(payment.value() * factor, payment.currency())
     }
 }
 
@@ -828,5 +1036,201 @@ mod tests {
             ),
             Err(TvmError::SolveDidNotConverge)
         );
+    }
+
+    /// The growing annuity (ADR-0048). The closed forms are checked against a
+    /// term-by-term sum of the payments themselves — an independent reference, so
+    /// a mistranscribed factor cannot agree with it by construction.
+    mod growing {
+        use super::{approx, rate};
+        use crate::{annuity, Currency, Money, Period, TvmError};
+
+        /// `Σ PMT·(1+g)^(k−1) / (1+r)^k` for `k = 1..=n` — the ordinary growing
+        /// annuity summed directly, one payment at a time.
+        fn present_value_by_summation(r: f64, g: f64, n: u32, pmt: f64) -> f64 {
+            let mut total = 0.0;
+            let mut payment = pmt;
+            let mut discount = 1.0 + r;
+            for _ in 0..n {
+                total += payment / discount;
+                payment *= 1.0 + g;
+                discount *= 1.0 + r;
+            }
+            total
+        }
+
+        /// `Σ PMT·(1+g)^(k−1) · (1+r)^(n−k)` for `k = 1..=n` — the same stream
+        /// carried forward to period `n` instead of discounted back.
+        fn future_value_by_summation(r: f64, g: f64, n: u32, pmt: f64) -> f64 {
+            let mut total = 0.0;
+            let mut payment = pmt;
+            for k in 0..n {
+                let mut compounded = payment;
+                for _ in 0..(n - 1 - k) {
+                    compounded *= 1.0 + r;
+                }
+                total += compounded;
+                payment *= 1.0 + g;
+            }
+            total
+        }
+
+        #[test]
+        fn present_value_matches_a_direct_summation() {
+            let pv = annuity::growing_present_value(
+                rate(0.05),
+                rate(0.02),
+                Period::new(12.0).unwrap(),
+                Money::agnostic(100.0).unwrap(),
+            )
+            .unwrap();
+            assert!(approx(
+                pv.value(),
+                present_value_by_summation(0.05, 0.02, 12, 100.0),
+                1e-9,
+            ));
+        }
+
+        #[test]
+        fn future_value_matches_a_direct_summation() {
+            let fv = annuity::growing_future_value(
+                rate(0.05),
+                rate(0.02),
+                Period::new(12.0).unwrap(),
+                Money::agnostic(100.0).unwrap(),
+            )
+            .unwrap();
+            assert!(approx(
+                fv.value(),
+                future_value_by_summation(0.05, 0.02, 12, 100.0),
+                1e-9,
+            ));
+        }
+
+        /// At `r = g` the closed form is `0/0`, so the factors switch to their
+        /// limits: every payment discounts to the same amount, giving `n·PMT/(1+r)`
+        /// present and `n·PMT·(1+r)ⁿ⁻¹` future. Both are checked against the
+        /// summation as well, so the limit is pinned to the thing it is a limit of.
+        #[test]
+        fn growth_equal_to_the_rate_uses_the_limit() {
+            let periods = Period::new(10.0).unwrap();
+            let payment = Money::agnostic(100.0).unwrap();
+
+            let pv = annuity::growing_present_value(rate(0.05), rate(0.05), periods, payment)
+                .unwrap()
+                .value();
+            assert!(approx(pv, 10.0 * 100.0 / 1.05, 1e-9));
+            assert!(approx(
+                pv,
+                present_value_by_summation(0.05, 0.05, 10, 100.0),
+                1e-9,
+            ));
+
+            let fv = annuity::growing_future_value(rate(0.05), rate(0.05), periods, payment)
+                .unwrap()
+                .value();
+            assert!(approx(
+                fv,
+                future_value_by_summation(0.05, 0.05, 10, 100.0),
+                1e-9,
+            ));
+        }
+
+        /// Growth *above* the discount rate is priced, not rejected: a finite sum
+        /// of finite terms always converges. This is the deliberate difference from
+        /// [`annuity::growing_perpetuity`], which returns `DivergentPerpetuity`
+        /// for the very same rate/growth pair (ADR-0048).
+        #[test]
+        fn growth_above_the_rate_is_priced_not_rejected() {
+            let pv = annuity::growing_present_value(
+                rate(0.02),
+                rate(0.05),
+                Period::new(12.0).unwrap(),
+                Money::agnostic(100.0).unwrap(),
+            )
+            .unwrap();
+            assert!(approx(
+                pv.value(),
+                present_value_by_summation(0.02, 0.05, 12, 100.0),
+                1e-9,
+            ));
+
+            assert_eq!(
+                annuity::growing_perpetuity(
+                    rate(0.02),
+                    rate(0.05),
+                    Money::agnostic(100.0).unwrap()
+                ),
+                Err(TvmError::DivergentPerpetuity),
+            );
+        }
+
+        #[test]
+        fn due_variants_are_the_ordinary_ones_scaled_by_one_plus_r() {
+            let periods = Period::new(12.0).unwrap();
+            let payment = Money::agnostic(100.0).unwrap();
+
+            let ordinary_present =
+                annuity::growing_present_value(rate(0.05), rate(0.02), periods, payment)
+                    .unwrap()
+                    .value();
+            let due_present =
+                annuity::due::growing_present_value(rate(0.05), rate(0.02), periods, payment)
+                    .unwrap()
+                    .value();
+            assert!(approx(due_present, ordinary_present * 1.05, 1e-9));
+
+            let ordinary_future =
+                annuity::growing_future_value(rate(0.05), rate(0.02), periods, payment)
+                    .unwrap()
+                    .value();
+            let due_future =
+                annuity::due::growing_future_value(rate(0.05), rate(0.02), periods, payment)
+                    .unwrap()
+                    .value();
+            assert!(approx(due_future, ordinary_future * 1.05, 1e-9));
+        }
+
+        /// The growing functions carry the payment's currency, like every other
+        /// monetary operation (ADR-0034).
+        #[test]
+        fn growing_values_keep_the_payment_currency() {
+            let payment = Money::new(100.0, Currency::Usd).unwrap();
+            let periods = Period::new(12.0).unwrap();
+            assert_eq!(
+                annuity::growing_present_value(rate(0.05), rate(0.02), periods, payment)
+                    .unwrap()
+                    .currency(),
+                Currency::Usd,
+            );
+            assert_eq!(
+                annuity::due::growing_future_value(rate(0.05), rate(0.02), periods, payment)
+                    .unwrap()
+                    .currency(),
+                Currency::Usd,
+            );
+        }
+
+        /// A zero-period growing annuity has nothing to pay, so it is worth zero —
+        /// not an error. (`payment` is the degenerate case that *is* rejected,
+        /// because dividing by a zero factor has no answer.)
+        #[test]
+        fn a_zero_term_is_worth_nothing() {
+            let payment = Money::agnostic(100.0).unwrap();
+            assert!(approx(
+                annuity::growing_present_value(rate(0.05), rate(0.02), Period::ZERO, payment)
+                    .unwrap()
+                    .value(),
+                0.0,
+                1e-12,
+            ));
+            assert!(approx(
+                annuity::growing_future_value(rate(0.05), rate(0.02), Period::ZERO, payment)
+                    .unwrap()
+                    .value(),
+                0.0,
+                1e-12,
+            ));
+        }
     }
 }

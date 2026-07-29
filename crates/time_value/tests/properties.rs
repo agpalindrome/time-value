@@ -539,4 +539,109 @@ proptest! {
         // so this is looser than the exact-payment schedule's conservation law.
         prop_assert!(close(repaid, principal, 1e-6 * principal));
     }
+
+    /// A growing annuity with **zero growth** is a level annuity: both the present
+    /// and the future value agree with their `annuity` counterparts (ADR-0048).
+    /// This is the reduction the growing factors are built to satisfy, and it is a
+    /// universal over every rate and term, so it is a property rather than a case.
+    #[test]
+    fn growing_at_zero_growth_is_the_level_annuity(
+        payment in 1.0f64..1e5,
+        rate in -0.5f64..1.0,
+        periods in 1.0f64..120.0,
+    ) {
+        use time_value::{annuity, Period};
+
+        let r = Rate::<Monthly>::new(rate).unwrap();
+        let g = Rate::<Monthly>::new(0.0).unwrap();
+        let n = Period::new(periods).unwrap();
+        let payment = Money::agnostic(payment).unwrap();
+
+        let level_pv = annuity::present_value(r, n, payment).unwrap().value();
+        let growing_pv = annuity::growing_present_value(r, g, n, payment).unwrap().value();
+        // The two factors reach the same value by different routes — `(1+r)⁻ⁿ`
+        // against `((1+0)/(1+r))ⁿ` — so they agree to a few ulps, not exactly.
+        prop_assert!(close(growing_pv, level_pv, 1e-9 * level_pv.abs()));
+
+        let level_fv = annuity::future_value(r, n, payment).unwrap().value();
+        let growing_fv = annuity::growing_future_value(r, g, n, payment).unwrap().value();
+        prop_assert!(close(growing_fv, level_fv, 1e-9 * level_fv.abs()));
+    }
+
+    /// The growing future value is the growing present value carried forward over
+    /// the whole term: `FV = PV · (1 + r)ⁿ` (ADR-0048). The band is bounded so the
+    /// compounded value stays comfortably finite.
+    #[test]
+    fn growing_future_value_is_the_present_value_compounded(
+        payment in 1.0f64..1e5,
+        rate in -0.5f64..0.5,
+        growth in -0.5f64..0.5,
+        periods in 1.0f64..40.0,
+    ) {
+        use time_value::{annuity, Period};
+
+        let r = Rate::<Monthly>::new(rate).unwrap();
+        let g = Rate::<Monthly>::new(growth).unwrap();
+        let n = Period::new(periods).unwrap();
+        let payment = Money::agnostic(payment).unwrap();
+
+        let pv = annuity::growing_present_value(r, g, n, payment).unwrap().value();
+        let fv = annuity::growing_future_value(r, g, n, payment).unwrap().value();
+        let compounded = pv * (1.0 + rate).powf(periods);
+        prop_assert!(close(fv, compounded, 1e-6 * compounded.abs()));
+    }
+
+    /// As the term grows without bound the growing annuity approaches the growing
+    /// *perpetuity* `PMT / (r − g)`, whenever `r > g` (ADR-0048). Generated as a
+    /// growth plus a strictly positive spread, so the perpetuity converges and is
+    /// a legal comparison in the first place.
+    ///
+    /// A 2000-period term is "without bound" enough here: the residual is
+    /// `((1+g)/(1+r))ⁿ`, which at the narrowest spread in range is already about
+    /// `1e-9` of the answer.
+    #[test]
+    fn a_long_growing_annuity_approaches_the_growing_perpetuity(
+        payment in 1.0f64..1e5,
+        growth in -0.2f64..0.2,
+        spread in 0.01f64..0.5,
+    ) {
+        use time_value::{annuity, Period};
+
+        let g = Rate::<Monthly>::new(growth).unwrap();
+        let r = Rate::<Monthly>::new(growth + spread).unwrap();
+        let n = Period::new(2000.0).unwrap();
+        let payment = Money::agnostic(payment).unwrap();
+
+        let finite = annuity::growing_present_value(r, g, n, payment).unwrap().value();
+        let forever = annuity::growing_perpetuity(r, g, payment).unwrap().value();
+        prop_assert!(close(finite, forever, 1e-6 * forever));
+    }
+
+    /// Each growing annuity-due is its ordinary counterpart scaled by `(1 + r)` —
+    /// the same relationship ADR-0015 established for the level case, now holding
+    /// across the growing pair too (ADR-0048).
+    #[test]
+    fn growing_due_is_the_ordinary_value_scaled_by_one_plus_the_rate(
+        payment in 1.0f64..1e5,
+        rate in -0.5f64..0.5,
+        growth in -0.5f64..0.5,
+        periods in 1.0f64..40.0,
+    ) {
+        use time_value::{annuity, Period};
+
+        let r = Rate::<Monthly>::new(rate).unwrap();
+        let g = Rate::<Monthly>::new(growth).unwrap();
+        let n = Period::new(periods).unwrap();
+        let payment = Money::agnostic(payment).unwrap();
+
+        let ordinary_present = annuity::growing_present_value(r, g, n, payment).unwrap().value();
+        let due_present = annuity::due::growing_present_value(r, g, n, payment).unwrap().value();
+        let scaled_present = ordinary_present * (1.0 + rate);
+        prop_assert!(close(due_present, scaled_present, 1e-9 * scaled_present.abs()));
+
+        let ordinary_future = annuity::growing_future_value(r, g, n, payment).unwrap().value();
+        let due_future = annuity::due::growing_future_value(r, g, n, payment).unwrap().value();
+        let scaled_future = ordinary_future * (1.0 + rate);
+        prop_assert!(close(due_future, scaled_future, 1e-9 * scaled_future.abs()));
+    }
 }
