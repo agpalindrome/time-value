@@ -297,6 +297,126 @@ fn annuity_growing_perpetuity_present_value() {
 }
 
 #[test]
+fn annuity_growing_present_and_future_value() {
+    // A first payment of 100 growing 2%/period for a year, discounted at 5%:
+    // PV = 100·(1 − (1.02/1.05)¹²)/0.03 ≈ 979.32, and FV = PV·1.05¹² ≈ 1758.72.
+    time_value()
+        .args([
+            "annuity",
+            "growing",
+            "pv",
+            "--rate",
+            "0.05",
+            "--growth",
+            "0.02",
+            "--periods",
+            "12",
+            "--payment",
+            "100",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::starts_with("979.3"));
+
+    time_value()
+        .args([
+            "annuity",
+            "growing",
+            "fv",
+            "--rate",
+            "0.05",
+            "--growth",
+            "0.02",
+            "--periods",
+            "12",
+            "--payment",
+            "100",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::starts_with("1758.7"));
+}
+
+#[test]
+fn annuity_growing_prices_growth_above_the_rate() {
+    // The deliberate difference from `growing-perpetuity`, which rejects this
+    // pair as divergent: a *finite* growing annuity converges for any r and g
+    // (ADR-0048), so this must succeed rather than error.
+    time_value()
+        .args([
+            "annuity",
+            "growing",
+            "pv",
+            "--rate",
+            "0.02",
+            "--growth",
+            "0.05",
+            "--periods",
+            "12",
+            "--payment",
+            "100",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::starts_with("1386.7"));
+
+    time_value()
+        .args([
+            "annuity",
+            "growing-perpetuity",
+            "--rate",
+            "0.02",
+            "--growth",
+            "0.05",
+            "--payment",
+            "100",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("diverges"));
+}
+
+#[test]
+fn annuity_due_growing_is_the_ordinary_growing_scaled() {
+    // Due = ordinary × (1 + r): 979.32 × 1.05 ≈ 1028.28, 1758.72 × 1.05 ≈ 1846.65.
+    time_value()
+        .args([
+            "annuity",
+            "growing",
+            "due-pv",
+            "--rate",
+            "0.05",
+            "--growth",
+            "0.02",
+            "--periods",
+            "12",
+            "--payment",
+            "100",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::starts_with("1028.2"));
+
+    time_value()
+        .args([
+            "annuity",
+            "growing",
+            "due-fv",
+            "--rate",
+            "0.05",
+            "--growth",
+            "0.02",
+            "--periods",
+            "12",
+            "--payment",
+            "100",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::starts_with("1846.6"));
+}
+
+#[test]
 fn annuity_due_present_value_exceeds_ordinary() {
     // Annuity-due PV = ordinary PV * (1 + r); at 1% -> 1125.51 * 1.01 ≈ 1136.76.
     time_value()

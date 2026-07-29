@@ -19,7 +19,9 @@ the core library stays synchronous.
 | `annuity_present_value`, `annuity_future_value`, `annuity_payment` | ordinary (end-of-period) annuities |
 | `annuity_periods`, `annuity_rate` | solve an annuity for periods / rate, from a present or future value |
 | `annuity_perpetuity`, `annuity_growing_perpetuity` | present value of a (growing) perpetuity |
+| `annuity_growing_present_value`, `annuity_growing_future_value` | finite growing annuity — a payment that grows each period (the rate need not exceed the growth) |
 | `annuity_due_present_value`, `annuity_due_future_value`, `annuity_due_payment` | annuity-due (start-of-period) |
+| `annuity_growing_due_present_value`, `annuity_growing_due_future_value` | finite growing annuity-due |
 | `rate_effective_annual`, `rate_convert`, `rate_from_nominal`, `rate_nominal` | rate conversions (each takes a periodicity) |
 | `amortize` | an amortization schedule (array of rows) from a term or a level payment |
 

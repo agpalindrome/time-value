@@ -5,7 +5,7 @@
 //! Commands are grouped by relationship family: `series` (net present/future
 //! value, IRR, MIRR, and the dated XNPV/XIRR), `single-sum` (present/future value
 //! and the solve-for `nper`/`rate` inverses), `annuity` (ordinary, annuity-`due`,
-//! and perpetuity forms, plus the `nper`/`rate` solves), `rate` (conversions
+//! perpetuity, and growing forms, plus the `nper`/`rate` solves), `rate` (conversions
 //! between periodicities and nominal/effective quotes — the only family that
 //! takes a periodicity), `continuous` (continuous compounding at a force of
 //! interest — `fv`/`pv` over a real-number `years` span, plus the
@@ -64,7 +64,7 @@ enum Command {
         #[command(subcommand)]
         command: SingleSumCommand,
     },
-    /// Annuity operations: ordinary, annuity-due, perpetuity, and the solves.
+    /// Annuity operations: ordinary, annuity-due, perpetuity, growing, and the solves.
     Annuity {
         #[command(subcommand)]
         command: AnnuityCommand,
@@ -310,6 +310,11 @@ enum AnnuityCommand {
         #[arg(long, allow_hyphen_values = true)]
         payment: f64,
     },
+    /// Growing-annuity calculations: the payment grows each period.
+    Growing {
+        #[command(subcommand)]
+        command: AnnuityGrowingCommand,
+    },
     /// Annuity-due (start-of-period payment) calculations.
     Due {
         #[command(subcommand)]
@@ -348,6 +353,66 @@ enum AnnuityDueCommand {
         /// The present value to amortise.
         #[arg(long, allow_hyphen_values = true)]
         present: f64,
+    },
+}
+
+/// The growing-annuity subcommands (ADR-0048/0049). Grouped under `growing`
+/// rather than spread across the ordinary and `due` groups: growth is one
+/// variation applied to all four values, and keeping them together also keeps the
+/// `annuity` dispatcher short.
+#[derive(Subcommand)]
+enum AnnuityGrowingCommand {
+    /// Present value of a growing annuity (payments at the end of each period).
+    Pv {
+        #[arg(long, allow_hyphen_values = true)]
+        rate: f64,
+        /// The per-period growth rate of the payment (may exceed --rate).
+        #[arg(long, allow_hyphen_values = true)]
+        growth: f64,
+        #[arg(long, allow_hyphen_values = true)]
+        periods: f64,
+        /// The first payment (at the end of period 1).
+        #[arg(long, allow_hyphen_values = true)]
+        payment: f64,
+    },
+    /// Future value of a growing annuity (payments at the end of each period).
+    Fv {
+        #[arg(long, allow_hyphen_values = true)]
+        rate: f64,
+        /// The per-period growth rate of the payment (may exceed --rate).
+        #[arg(long, allow_hyphen_values = true)]
+        growth: f64,
+        #[arg(long, allow_hyphen_values = true)]
+        periods: f64,
+        /// The first payment (at the end of period 1).
+        #[arg(long, allow_hyphen_values = true)]
+        payment: f64,
+    },
+    /// Present value of a growing annuity-due (payments at the start of each period).
+    DuePv {
+        #[arg(long, allow_hyphen_values = true)]
+        rate: f64,
+        /// The per-period growth rate of the payment (may exceed --rate).
+        #[arg(long, allow_hyphen_values = true)]
+        growth: f64,
+        #[arg(long, allow_hyphen_values = true)]
+        periods: f64,
+        /// The first payment (at the start of period 1).
+        #[arg(long, allow_hyphen_values = true)]
+        payment: f64,
+    },
+    /// Future value of a growing annuity-due (payments at the start of each period).
+    DueFv {
+        #[arg(long, allow_hyphen_values = true)]
+        rate: f64,
+        /// The per-period growth rate of the payment (may exceed --rate).
+        #[arg(long, allow_hyphen_values = true)]
+        growth: f64,
+        #[arg(long, allow_hyphen_values = true)]
+        periods: f64,
+        /// The first payment (at the start of period 1).
+        #[arg(long, allow_hyphen_values = true)]
+        payment: f64,
     },
 }
 
@@ -778,7 +843,60 @@ fn run_annuity(command: AnnuityCommand, currency: Currency) -> Result<ScalarOutp
                     .context("growing perpetuity diverges (rate must exceed growth)")?;
             money_out(pv)
         }
+        AnnuityCommand::Growing { command } => run_annuity_growing(command, currency)?,
         AnnuityCommand::Due { command } => run_annuity_due(command, currency)?,
+    })
+}
+
+/// Dispatch the `annuity growing` subcommands — the finite growing annuity in all
+/// four forms (present/future × ordinary/due), ADR-0048/0049.
+#[allow(clippy::needless_pass_by_value)]
+fn run_annuity_growing(command: AnnuityGrowingCommand, currency: Currency) -> Result<ScalarOutput> {
+    Ok(match command {
+        AnnuityGrowingCommand::Pv {
+            rate: r,
+            growth,
+            periods: n,
+            payment,
+        } => money_out(annuity::growing_present_value(
+            rate(r)?,
+            rate(growth)?,
+            period(n)?,
+            money(payment, currency)?,
+        )?),
+        AnnuityGrowingCommand::Fv {
+            rate: r,
+            growth,
+            periods: n,
+            payment,
+        } => money_out(annuity::growing_future_value(
+            rate(r)?,
+            rate(growth)?,
+            period(n)?,
+            money(payment, currency)?,
+        )?),
+        AnnuityGrowingCommand::DuePv {
+            rate: r,
+            growth,
+            periods: n,
+            payment,
+        } => money_out(annuity::due::growing_present_value(
+            rate(r)?,
+            rate(growth)?,
+            period(n)?,
+            money(payment, currency)?,
+        )?),
+        AnnuityGrowingCommand::DueFv {
+            rate: r,
+            growth,
+            periods: n,
+            payment,
+        } => money_out(annuity::due::growing_future_value(
+            rate(r)?,
+            rate(growth)?,
+            period(n)?,
+            money(payment, currency)?,
+        )?),
     })
 }
 

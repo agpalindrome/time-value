@@ -147,6 +147,31 @@ fn annuity_perpetuity_and_due_tools() {
 }
 
 #[test]
+fn annuity_growing_tools() {
+    let calls = concat!(
+        r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"annuity_growing_present_value","arguments":{"rate":0.05,"growth":0.02,"periods":12,"payment":100}}}"#,
+        "\n",
+        r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"annuity_growing_due_future_value","arguments":{"rate":0.05,"growth":0.02,"periods":12,"payment":100}}}"#,
+        "\n",
+        // Growth above the rate is priced, not rejected — the deliberate
+        // difference from `annuity_growing_perpetuity` (ADR-0048).
+        r#"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"annuity_growing_present_value","arguments":{"rate":0.02,"growth":0.05,"periods":12,"payment":100}}}"#,
+        "\n",
+    );
+
+    Command::cargo_bin("time-value-mcp")
+        .unwrap()
+        .write_stdin(session(calls))
+        .assert()
+        .success()
+        // Growing PV ≈ 979.32; the growing annuity-due FV ≈ 1846.65.
+        .stdout(predicate::str::contains("979.3"))
+        .stdout(predicate::str::contains("1846.6"))
+        // r < g still converges over a finite term: ≈ 1386.73.
+        .stdout(predicate::str::contains("1386.7"));
+}
+
+#[test]
 fn annuity_periods_requires_exactly_one_anchor() {
     let calls = concat!(
         r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"annuity_periods","arguments":{"rate":0.01,"payment":100}}}"#,

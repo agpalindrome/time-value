@@ -307,6 +307,30 @@ pub(crate) struct AnnuityValueInput {
     pub currency: Option<Currency>,
 }
 
+/// Input for the four growing-annuity tools — `annuity_growing_present_value`,
+/// `annuity_growing_future_value`, and their `annuity_due_*` counterparts
+/// (ADR-0048).
+///
+/// Unlike [`GrowingPerpetuityInput`], `rate` need not exceed `growth`: a finite
+/// growing annuity converges for every rate and growth pair.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub(crate) struct GrowingAnnuityInput {
+    /// Per-period rate.
+    pub rate: f64,
+    /// The per-period growth rate of the payment.
+    pub growth: f64,
+    /// Number of periods (may be fractional).
+    pub periods: f64,
+    /// The first payment — at the end of period 1 (ordinary) or the start of
+    /// period 1 (annuity-due). Each later payment is `(1 + growth)` times the one
+    /// before.
+    pub payment: f64,
+    /// ISO 4217 currency to denominate the amounts in (e.g. `USD`, `JPY`).
+    /// Omit for currency-agnostic (`XXX`) amounts. An unknown code is rejected.
+    #[serde(default)]
+    pub currency: Option<Currency>,
+}
+
 /// Input for the `continuous_future_value` and `continuous_present_value` tools.
 /// `rate` is the force of interest δ; `years` is a continuous span (it may be
 /// fractional or negative), not a period count (ADR-0036).

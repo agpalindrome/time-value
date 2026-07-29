@@ -22,9 +22,10 @@ use time_value_daycount::{act365_year_fraction, iso_to_day};
 use crate::params::{
     AmortizeInput, AnnuityPaymentInput, AnnuityPeriodsInput, AnnuityRateInput, AnnuityValueInput,
     ContinuousRateInput, ContinuousValueInput, ConvertInput, DatedFlow, DatedIrrInput,
-    DatedSeriesInput, FutureValueInput, GrowingPerpetuityInput, IrrInput, MirrInput, Periodicity,
-    PerpetuityInput, PresentValueInput, RateConvertInput, RateEffectiveAnnualInput,
-    RateFromNominalInput, SeriesInput, SingleSumPeriodsInput, SingleSumRateInput,
+    DatedSeriesInput, FutureValueInput, GrowingAnnuityInput, GrowingPerpetuityInput, IrrInput,
+    MirrInput, Periodicity, PerpetuityInput, PresentValueInput, RateConvertInput,
+    RateEffectiveAnnualInput, RateFromNominalInput, SeriesInput, SingleSumPeriodsInput,
+    SingleSumRateInput,
 };
 use crate::results::{MoneyResult, ScalarResult, ScheduleResult};
 
@@ -74,8 +75,13 @@ dates, at an annual rate). Single sum: `single_sum_present_value`, \
 `single_sum_rate` (RATE). Annuity: `annuity_present_value`, \
 `annuity_future_value`, `annuity_payment`, the solves `annuity_periods` / \
 `annuity_rate` (each from a present or future value), `annuity_perpetuity`, \
-`annuity_growing_perpetuity`, and the annuity-due forms \
-`annuity_due_present_value`, `annuity_due_future_value`, `annuity_due_payment`. \
+`annuity_growing_perpetuity`, the finite growing forms \
+`annuity_growing_present_value` / `annuity_growing_future_value` (a payment that \
+grows each period; unlike a perpetuity, the rate need not exceed the growth), and \
+the annuity-due forms `annuity_due_present_value`, `annuity_due_future_value`, \
+`annuity_due_payment`. The growing forms carry a `growing` prefix throughout: \
+`annuity_growing_present_value`, `annuity_growing_future_value`, \
+`annuity_growing_due_present_value`, `annuity_growing_due_future_value`. \
 Rate conversions: `rate_effective_annual` (EAR), `rate_convert` (between \
 periodicities), `rate_from_nominal` and `rate_nominal` (nominal/APR) — each takes \
 a periodicity (daily, weekly, monthly, quarterly, semi-annual, annual). \
@@ -402,6 +408,44 @@ impl TimeValueServer {
     }
 
     #[tool(
+        name = "annuity_growing_present_value",
+        description = "Present value of a growing annuity — an end-of-period payment that grows each period, over a finite number of periods. Unlike a growing perpetuity, the rate need not exceed the growth rate."
+    )]
+    fn annuity_growing_present_value(
+        &self,
+        Parameters(input): Parameters<GrowingAnnuityInput>,
+    ) -> Result<Json<MoneyResult>, ErrorData> {
+        let currency = resolve_currency(input.currency);
+        let money = annuity::growing_present_value(
+            rate(input.rate)?,
+            rate(input.growth)?,
+            period(input.periods)?,
+            money(input.payment, currency)?,
+        )
+        .map_err(tvm)?;
+        Ok(Json(money.into()))
+    }
+
+    #[tool(
+        name = "annuity_growing_future_value",
+        description = "Future value of a growing annuity — an end-of-period payment that grows each period, over a finite number of periods."
+    )]
+    fn annuity_growing_future_value(
+        &self,
+        Parameters(input): Parameters<GrowingAnnuityInput>,
+    ) -> Result<Json<MoneyResult>, ErrorData> {
+        let currency = resolve_currency(input.currency);
+        let money = annuity::growing_future_value(
+            rate(input.rate)?,
+            rate(input.growth)?,
+            period(input.periods)?,
+            money(input.payment, currency)?,
+        )
+        .map_err(tvm)?;
+        Ok(Json(money.into()))
+    }
+
+    #[tool(
         name = "annuity_due_present_value",
         description = "Present value of an annuity-due that pays a fixed amount at the start of each period."
     )]
@@ -453,6 +497,44 @@ impl TimeValueServer {
         )
         .map_err(tvm)?;
         Ok(Json(payment.into()))
+    }
+
+    #[tool(
+        name = "annuity_growing_due_present_value",
+        description = "Present value of a growing annuity-due — a start-of-period payment that grows each period, over a finite number of periods."
+    )]
+    fn annuity_growing_due_present_value(
+        &self,
+        Parameters(input): Parameters<GrowingAnnuityInput>,
+    ) -> Result<Json<MoneyResult>, ErrorData> {
+        let currency = resolve_currency(input.currency);
+        let money = annuity::due::growing_present_value(
+            rate(input.rate)?,
+            rate(input.growth)?,
+            period(input.periods)?,
+            money(input.payment, currency)?,
+        )
+        .map_err(tvm)?;
+        Ok(Json(money.into()))
+    }
+
+    #[tool(
+        name = "annuity_growing_due_future_value",
+        description = "Future value of a growing annuity-due — a start-of-period payment that grows each period, over a finite number of periods."
+    )]
+    fn annuity_growing_due_future_value(
+        &self,
+        Parameters(input): Parameters<GrowingAnnuityInput>,
+    ) -> Result<Json<MoneyResult>, ErrorData> {
+        let currency = resolve_currency(input.currency);
+        let money = annuity::due::growing_future_value(
+            rate(input.rate)?,
+            rate(input.growth)?,
+            period(input.periods)?,
+            money(input.payment, currency)?,
+        )
+        .map_err(tvm)?;
+        Ok(Json(money.into()))
     }
 
     #[tool(
