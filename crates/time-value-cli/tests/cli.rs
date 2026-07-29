@@ -779,6 +779,21 @@ fn currency_is_added_as_a_json_field() {
         .stdout(predicate::str::contains("\"currency\":\"JPY\""));
 }
 
+/// `--json`'s own help text said "a one-field JSON object", which
+/// `currency_is_added_as_a_json_field` above disproves — a monetary result in a
+/// non-`XXX` currency has two. Nothing tested the help string, so it went stale
+/// while the module doc twenty lines away stayed right. Pin it to the shape the
+/// binary actually emits (ADR-0045 rule 2).
+#[test]
+fn the_json_flag_help_describes_the_currency_field_it_can_emit() {
+    time_value()
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("one-field").not())
+        .stdout(predicate::str::contains("`\"currency\"` field"));
+}
+
 #[test]
 fn currency_is_not_echoed_for_a_rate_result() {
     // IRR is a rate, not money — the currency does not apply.

@@ -159,3 +159,81 @@ pub(crate) fn bracket_and_bisect(f: impl Fn(f64) -> Residual) -> Option<f64> {
     }
     None
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{bracket_and_bisect, newton, Residual};
+
+    /// A residual with roots at `first` and `second`, judged against a constant
+    /// scale of `1`, so [`Residual::is_root`]'s relative tolerance is a plain
+    /// `1e-9` absolute one and the arithmetic below is exact.
+    fn quadratic(first: f64, second: f64) -> impl Fn(f64) -> Residual {
+        move |r| Residual {
+            value: (r - first) * (r - second),
+            scale: 1.0,
+        }
+    }
+
+    /// `bracket_and_bisect`'s doc says it scans from just above `r = −1` upward and
+    /// "returns the lowest bracketed root". Pin that against a residual with two
+    /// roots: it must find the lower one, whichever end it is asked from — the
+    /// function takes no guess, so the choice is fixed rather than steerable.
+    #[test]
+    fn the_scan_returns_the_lowest_root() {
+        for (lower, upper) in [(0.5, 2.0), (-0.5, 3.0), (0.0, 1.0)] {
+            // Declared in both orders: the answer depends on the roots, not on the
+            // order the factors happen to be written in.
+            for f in [quadratic(lower, upper), quadratic(upper, lower)] {
+                let found = bracket_and_bisect(f).expect("a sign change exists");
+                assert!(
+                    super::within(found - lower, 1e-6),
+                    "found {found} rather than the lower root {lower} (upper {upper})",
+                );
+            }
+        }
+    }
+
+    /// The contrast that makes the previous test meaningful: Newton *is* steerable,
+    /// so on the same two-root residual it converges to whichever root the guess is
+    /// nearest. `d/dr (r − a)(r − b) = 2r − a − b`.
+    #[test]
+    fn newton_converges_to_the_root_nearest_the_guess() {
+        let (lower, upper) = (0.5, 2.0);
+        let with_derivative = |r: f64| (quadratic(lower, upper)(r), 2.0 * r - lower - upper);
+        for (guess, expected) in [(0.4, lower), (0.6, lower), (1.9, upper), (5.0, upper)] {
+            let found = newton(with_derivative, guess).expect("Newton converges here");
+            assert!(
+                super::within(found - expected, 1e-6),
+                "guess {guess} found {found} rather than {expected}",
+            );
+        }
+    }
+
+    /// `None` when the residual never changes sign — the "no root" answer both IRR
+    /// and the rate solves surface as an error rather than a value.
+    #[test]
+    fn a_residual_that_never_changes_sign_has_no_bracket() {
+        // (r - 1)² + 1 ≥ 1 everywhere, so no sign change and no root.
+        assert!(bracket_and_bisect(|r: f64| Residual {
+            value: (r - 1.0) * (r - 1.0) + 1.0,
+            scale: 1.0,
+        })
+        .is_none());
+    }
+
+    /// A non-finite scale would make the relative tolerance infinite and accept
+    /// every sample, so `is_root` rejects it outright (ADR-0054). Stated in the
+    /// rustdoc; pin it.
+    #[test]
+    fn a_non_finite_scale_is_never_a_root() {
+        for scale in [f64::INFINITY, f64::NEG_INFINITY, f64::NAN] {
+            assert!(!Residual { value: 0.0, scale }.is_root());
+        }
+        // …and a `NaN` value fails the tolerance test, whatever the scale.
+        assert!(!Residual {
+            value: f64::NAN,
+            scale: 1.0,
+        }
+        .is_root());
+    }
+}

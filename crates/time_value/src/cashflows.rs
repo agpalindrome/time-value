@@ -162,9 +162,21 @@ impl<'a, P: Periodicity> Cashflows<'a, P> {
     /// poor guess, a flat derivative, or an iterate that leaves the valid domain),
     /// it falls back to a **bracketing search**: it scans the rate domain for a
     /// sign change in the NPV and bisects it, so a root is found whenever one
-    /// exists. The fallback returns the lowest bracketed root. Both methods are
-    /// arithmetic-only (integer powers of the discount factor), so IRR stays in
-    /// the default `no_std` build.
+    /// exists. The fallback returns the lowest bracketed root — a *fixed* choice,
+    /// not the one nearest the guess, so steering only works while Newton is doing
+    /// the work. Both methods are arithmetic-only (integer powers of the discount
+    /// factor), so IRR stays in the default `no_std` build.
+    ///
+    /// # Currency
+    ///
+    /// **The flows' currencies are not folded, and never a `CurrencyMismatch`**
+    /// (ADR-0057). The result is a [`Rate<P>`], which carries no denomination, so
+    /// there is no currency to derive; the operations that *do* check are the ones
+    /// returning [`Money`]. A series
+    /// [`net_present_value`](Self::net_present_value) rejects therefore still has
+    /// an IRR — the rate that zeroes the sum of the bare magnitudes. Fold the
+    /// currencies yourself (or call `net_present_value` once) if a mixed series
+    /// should be an error at your call site.
     ///
     /// # Errors
     ///
@@ -251,6 +263,11 @@ impl<P: Periodicity> Cashflows<'_, P> {
     /// The two accumulations are arithmetic-only, but the terminal `N`-th root
     /// needs `powf`, which is why this operation is feature-gated (ADR-0026). All
     /// three rates share the periodicity `P`.
+    ///
+    /// Like [`internal_rate_of_return`](Self::internal_rate_of_return), it returns
+    /// a rate and so **does not fold the flows' currencies** (ADR-0057); a mixed
+    /// series that [`net_present_value`](Self::net_present_value) rejects still has
+    /// an MIRR.
     ///
     /// # Examples
     ///
@@ -592,6 +609,187 @@ mod tests {
         assert_eq!(series.net_future_value(rate), Err(expected));
     }
 
+    /// The fold stops at the **first** clash, so the payload names the currency
+    /// accumulated so far and the flow that broke it — not the last pair in the
+    /// series. The slice order is fixed, so the payload is deterministic: `Jpy`
+    /// never appears, because the fold never reaches it.
+    #[test]
+    fn a_mismatch_names_the_first_clashing_pair_not_the_last() {
+        use crate::Currency;
+        let flows = [
+            Money::new(-100.0, Currency::Usd).unwrap(),
+            Money::new(60.0, Currency::Eur).unwrap(),
+            Money::new(60.0, Currency::Jpy).unwrap(),
+        ];
+        let rate = Rate::<Monthly>::new(0.01).unwrap();
+        assert_eq!(
+            Cashflows::<Monthly>::new(&flows).net_present_value(rate),
+            Err(TvmError::CurrencyMismatch {
+                left: Currency::Usd,
+                right: Currency::Eur,
+            })
+        );
+    }
+
+    /// ADR-0034's identity rule, folded over a whole *series*: a series mixing
+    /// `Xxx` with exactly one real currency is denominated in that currency, and a
+    /// uniformly-denominated series keeps its own. Exhaustive over
+    /// [`Currency::ALL`] rather than sampled — the domain is a small closed set, so
+    /// ADR-0045 rule 2 asks for iteration. The `Xxx` iteration is also the
+    /// wholly-agnostic case: an all-`Xxx` series stays `Xxx`.
+    #[test]
+    fn a_series_adopts_the_one_currency_it_names() {
+        use crate::Currency;
+        let rate = Rate::<Monthly>::new(0.01).unwrap();
+        for &currency in Currency::ALL {
+            // `Xxx` leading and trailing, one real flow in the middle.
+            let mixed = [
+                Money::agnostic(-100.0).unwrap(),
+                Money::new(60.0, currency).unwrap(),
+                Money::agnostic(60.0).unwrap(),
+            ];
+            let series = Cashflows::<Monthly>::new(&mixed);
+            assert_eq!(
+                series.net_present_value(rate).unwrap().currency(),
+                currency,
+                "npv of an Xxx-and-{} series lost the denomination",
+                currency.code(),
+            );
+            assert_eq!(
+                series.net_future_value(rate).unwrap().currency(),
+                currency,
+                "nfv of an Xxx-and-{} series lost the denomination",
+                currency.code(),
+            );
+
+            // Uniformly denominated: equal currencies pass through the fold.
+            let uniform = [
+                Money::new(-100.0, currency).unwrap(),
+                Money::new(60.0, currency).unwrap(),
+                Money::new(60.0, currency).unwrap(),
+            ];
+            let series = Cashflows::<Monthly>::new(&uniform);
+            assert_eq!(series.net_present_value(rate).unwrap().currency(), currency);
+            assert_eq!(series.net_future_value(rate).unwrap().currency(), currency);
+        }
+    }
+
+    /// `currency`'s doc says an **empty** series is `Xxx`; `Money::ZERO` is `0 Xxx`,
+    /// so name the currency explicitly rather than leaning on that equality.
+    #[test]
+    fn an_empty_series_is_currency_agnostic() {
+        use crate::Currency;
+        let empty: [Money; 0] = [];
+        let series = Cashflows::<Monthly>::new(&empty);
+        let rate = Rate::<Monthly>::new(0.05).unwrap();
+        assert_eq!(
+            series.net_present_value(rate).unwrap().currency(),
+            Currency::Xxx
+        );
+        assert_eq!(
+            series.net_future_value(rate).unwrap().currency(),
+            Currency::Xxx
+        );
+    }
+
+    /// The deliberate asymmetry of ADR-0057: the currency fold belongs to
+    /// *producing* a [`Money`], so the rate-returning operations never consult it.
+    /// A series `net_present_value` rejects therefore still has an IRR — and it is
+    /// exactly the IRR of the same magnitudes taken as pure numbers.
+    #[test]
+    fn irr_ignores_the_currencies_npv_rejects() {
+        use crate::Currency;
+        let mixed = [
+            Money::new(-100.0, Currency::Usd).unwrap(),
+            Money::new(60.0, Currency::Eur).unwrap(),
+            Money::new(60.0, Currency::Jpy).unwrap(),
+        ];
+        let series = Cashflows::<Monthly>::new(&mixed);
+
+        // NPV, which is denominated, refuses.
+        assert!(matches!(
+            series.net_present_value(Rate::<Monthly>::new(0.01).unwrap()),
+            Err(TvmError::CurrencyMismatch { .. })
+        ));
+
+        // IRR, which is not, answers — with the magnitude-only rate.
+        let agnostic_flows = agnostic([-100.0, 60.0, 60.0]);
+        let expected = Cashflows::<Monthly>::new(&agnostic_flows)
+            .internal_rate_of_return()
+            .unwrap();
+        assert_eq!(series.internal_rate_of_return().unwrap(), expected);
+        assert_eq!(
+            series.internal_rate_of_return_from(0.5).unwrap(),
+            Cashflows::<Monthly>::new(&agnostic_flows)
+                .internal_rate_of_return_from(0.5)
+                .unwrap()
+        );
+    }
+
+    /// `internal_rate_of_return_from` promises Newton "converges to the root
+    /// nearest the guess, which lets a caller steer toward the intended one when a
+    /// non-conventional series has several". Every other IRR test here uses a
+    /// single-root series, which cannot see that.
+    ///
+    /// `[−1000, 6000, −11000, 6000]` has three roots, exactly. With `x = 1/(1+r)`,
+    /// `NPV = −1000 + 6000x − 11000x² + 6000x³`, and
+    /// `6x³ − 11x² + 6x − 1 = (x − 1)(2x − 1)(3x − 1)`, so `x ∈ {1, ½, ⅓}` and
+    /// `r ∈ {0, 1, 2}` — 0%, 100% and 200% per period. The factorisation is exact,
+    /// so the expected values are not a numerical artefact.
+    #[test]
+    fn a_guess_steers_irr_to_the_root_nearest_it() {
+        let flows = agnostic([-1000.0, 6000.0, -11000.0, 6000.0]);
+        let series = Cashflows::<Monthly>::new(&flows);
+
+        // Each guess sits in the basin of one root, and lands on that one.
+        for (guess, expected) in [
+            (-0.5, 0.0),
+            (0.0, 0.0),
+            (0.2, 0.0),
+            (0.3, 1.0),
+            (0.9, 1.0),
+            (1.3, 1.0),
+            (1.5, 2.0),
+            (2.0, 2.0),
+            (5.0, 2.0),
+        ] {
+            let irr = series.internal_rate_of_return_from(guess).unwrap();
+            assert!(
+                approx(irr.value(), expected),
+                "guess {guess} found {} instead of the nearby root {expected}",
+                irr.value(),
+            );
+        }
+
+        // …and all three really are roots, so the test is steering rather than
+        // asserting three arbitrary numbers.
+        for root in [0.0, 1.0, 2.0] {
+            let rate = Rate::<Monthly>::new(root).unwrap();
+            assert!(
+                within(series.net_present_value(rate).unwrap().value(), 1e-6),
+                "{root} is not actually a root of this series",
+            );
+        }
+    }
+
+    /// The other half of the claim: when Newton bails out the bracketing fallback
+    /// takes over, and `root::bracket_and_bisect` "returns the lowest bracketed
+    /// root". A guess of `1e6` leaves the valid domain on Newton's first step, so
+    /// the answer comes from the scan — which finds `0`, the lowest of the three,
+    /// **not** the one nearest the guess (`2`). Guess-steering is Newton's
+    /// property; the fallback deliberately has a different, fixed one.
+    #[test]
+    fn the_bisection_fallback_returns_the_lowest_root_not_the_nearest() {
+        let flows = agnostic([-1000.0, 6000.0, -11000.0, 6000.0]);
+        let series = Cashflows::<Monthly>::new(&flows);
+        let irr = series.internal_rate_of_return_from(1e6).unwrap();
+        assert!(
+            approx(irr.value(), 0.0),
+            "the fallback returned {} rather than the lowest root 0",
+            irr.value(),
+        );
+    }
+
     #[test]
     fn irr_on_empty_series_errors() {
         let flows: [Money; 0] = [];
@@ -826,6 +1024,30 @@ mod tests {
             );
         }
 
+        /// MIRR returns a `Rate` too, so it makes the same choice as IRR
+        /// (ADR-0057): the currencies are never folded, and the answer is the one
+        /// the bare magnitudes give.
+        #[test]
+        fn mirr_ignores_the_currencies_npv_rejects() {
+            use crate::Currency;
+
+            let mixed = [
+                Money::new(-1000.0, Currency::Usd).unwrap(),
+                Money::new(-500.0, Currency::Eur).unwrap(),
+                Money::new(800.0, Currency::Jpy).unwrap(),
+                Money::new(900.0, Currency::Gbp).unwrap(),
+            ];
+            let agnostic = series(&[-1000.0, -500.0, 800.0, 900.0]);
+            assert_eq!(
+                Cashflows::<Monthly>::new(&mixed)
+                    .modified_internal_rate_of_return(rate(0.10), rate(0.12))
+                    .unwrap(),
+                Cashflows::<Monthly>::new(&agnostic)
+                    .modified_internal_rate_of_return(rate(0.10), rate(0.12))
+                    .unwrap(),
+            );
+        }
+
         #[test]
         fn no_inflows_is_a_total_loss() {
             // No positive cashflow, so the terminal value is 0 and MIRR = -100%.
@@ -911,6 +1133,40 @@ mod tests {
             assert!(owned.is_empty());
             let rate = Rate::<Monthly>::new(0.05).unwrap();
             assert_eq!(owned.net_present_value(rate).unwrap(), Money::ZERO);
+        }
+
+        /// The forwards inherit the currency fold, because they forward — but
+        /// "because they forward" is the thing worth pinning: a future
+        /// reimplementation here could quietly drop it (ADR-0034, ADR-0045 rule 2).
+        #[test]
+        fn owned_operations_inherit_the_currency_fold() {
+            use crate::{Currency, TvmError};
+
+            let rate = Rate::<Monthly>::new(0.01).unwrap();
+            let mismatched: Vec<Money> = alloc::vec![
+                Money::new(-100.0, Currency::Usd).unwrap(),
+                Money::new(60.0, Currency::Eur).unwrap(),
+            ];
+            let owned = OwnedCashflows::<Monthly>::new(mismatched);
+            let expected = TvmError::CurrencyMismatch {
+                left: Currency::Usd,
+                right: Currency::Eur,
+            };
+            assert_eq!(owned.net_present_value(rate), Err(expected.clone()));
+            assert_eq!(owned.net_future_value(rate), Err(expected));
+            // The rate-returning forward still answers (ADR-0057).
+            assert!(owned.internal_rate_of_return().is_ok());
+
+            // The identity rule, over the whole closed currency set.
+            for &currency in Currency::ALL {
+                let owned = OwnedCashflows::<Monthly>::new(alloc::vec![
+                    Money::agnostic(-100.0).unwrap(),
+                    Money::new(60.0, currency).unwrap(),
+                    Money::agnostic(60.0).unwrap(),
+                ]);
+                assert_eq!(owned.net_present_value(rate).unwrap().currency(), currency);
+                assert_eq!(owned.net_future_value(rate).unwrap().currency(), currency);
+            }
         }
 
         #[cfg(any(feature = "std", feature = "libm"))]

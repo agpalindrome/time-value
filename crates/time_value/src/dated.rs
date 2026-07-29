@@ -166,6 +166,15 @@ impl<'a> DatedCashflows<'a> {
     /// whenever the XNPV changes sign. The convergence tolerance scales with the
     /// cashflow magnitudes (ADR-0021).
     ///
+    /// # Currency
+    ///
+    /// **The flows' currencies are not folded, and never a `CurrencyMismatch`**
+    /// (ADR-0057), for the same reason as the periodic
+    /// [`Cashflows::internal_rate_of_return_from`](crate::Cashflows::internal_rate_of_return_from):
+    /// the result is a rate, not a [`Money`], so it has no denomination to derive.
+    /// A series [`net_present_value`](Self::net_present_value) rejects still has an
+    /// XIRR.
+    ///
     /// # Errors
     ///
     /// - [`TvmError::EmptyCashflows`] if the series is empty.
@@ -394,6 +403,100 @@ mod tests {
         let base = 100.0 / 105.0;
         let expected = base * base - 1.0; // (1+r) = (100/105)^2
         assert!(approx(irr.value(), expected));
+    }
+
+    /// `net_present_value`'s `# Errors` names `CurrencyMismatch`, but nothing
+    /// executed it — the dated series had no currency test at all (ADR-0045 rule 2).
+    /// The fold is over the slice in order, so the payload is deterministic: `left`
+    /// is what accumulated before the clash, `right` the flow that broke it.
+    #[test]
+    fn xnpv_rejects_a_series_of_mixed_currencies() {
+        use crate::Currency;
+        let flows = [
+            DatedCashflow::new(0.0, Money::new(-100.0, Currency::Usd).unwrap()).unwrap(),
+            DatedCashflow::new(1.0, Money::new(110.0, Currency::Eur).unwrap()).unwrap(),
+        ];
+        assert_eq!(
+            DatedCashflows::new(&flows).net_present_value(annual(0.10)),
+            Err(TvmError::CurrencyMismatch {
+                left: Currency::Usd,
+                right: Currency::Eur,
+            })
+        );
+    }
+
+    /// ADR-0034's identity rule over a dated series, exhaustively across the closed
+    /// currency set: `Xxx` plus one real currency adopts it, a uniform series keeps
+    /// its own, and the `Xxx` iteration covers the wholly-agnostic case.
+    #[test]
+    fn a_dated_series_adopts_the_one_currency_it_names() {
+        use crate::Currency;
+        for &currency in Currency::ALL {
+            let mixed = [
+                DatedCashflow::new(0.0, Money::agnostic(-100.0).unwrap()).unwrap(),
+                DatedCashflow::new(1.0, Money::new(110.0, currency).unwrap()).unwrap(),
+            ];
+            assert_eq!(
+                DatedCashflows::new(&mixed)
+                    .net_present_value(annual(0.05))
+                    .unwrap()
+                    .currency(),
+                currency,
+                "an Xxx-and-{} dated series lost the denomination",
+                currency.code(),
+            );
+
+            let uniform = [
+                DatedCashflow::new(0.0, Money::new(-100.0, currency).unwrap()).unwrap(),
+                DatedCashflow::new(1.0, Money::new(110.0, currency).unwrap()).unwrap(),
+            ];
+            assert_eq!(
+                DatedCashflows::new(&uniform)
+                    .net_present_value(annual(0.05))
+                    .unwrap()
+                    .currency(),
+                currency,
+            );
+        }
+    }
+
+    /// An empty dated series is `Xxx` — named explicitly, rather than inferred from
+    /// `Money::ZERO` equality.
+    #[test]
+    fn an_empty_dated_series_is_currency_agnostic() {
+        let empty: [DatedCashflow; 0] = [];
+        assert_eq!(
+            DatedCashflows::new(&empty)
+                .net_present_value(annual(0.05))
+                .unwrap()
+                .currency(),
+            crate::Currency::Xxx,
+        );
+    }
+
+    /// XIRR makes the same choice as the periodic IRR (ADR-0057): it returns a
+    /// rate, so it never folds the currencies, and a series `net_present_value`
+    /// rejects still has an XIRR — the magnitude-only one.
+    #[test]
+    fn xirr_ignores_the_currencies_xnpv_rejects() {
+        use crate::Currency;
+        let mixed = [
+            DatedCashflow::new(0.0, Money::new(-100.0, Currency::Usd).unwrap()).unwrap(),
+            DatedCashflow::new(1.0, Money::new(110.0, Currency::Eur).unwrap()).unwrap(),
+        ];
+        let series = DatedCashflows::new(&mixed);
+        assert!(matches!(
+            series.net_present_value(annual(0.10)),
+            Err(TvmError::CurrencyMismatch { .. })
+        ));
+
+        let agnostic = [flow(0.0, -100.0), flow(1.0, 110.0)];
+        assert_eq!(
+            series.internal_rate_of_return().unwrap(),
+            DatedCashflows::new(&agnostic)
+                .internal_rate_of_return()
+                .unwrap(),
+        );
     }
 
     #[test]
