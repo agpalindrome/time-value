@@ -45,7 +45,7 @@ the old one **Superseded** (link both ways) — don't rewrite the old one.
 | [0024](0024-rate-conversions-effective-and-nominal.md) | Rate conversions — effective between periodicities, nominal as a quote | Accepted |
 | [0025](0025-solve-for-periods-and-rate.md) | Solve for periods (NPER) and rate (RATE) | Accepted |
 | [0026](0026-modified-internal-rate-of-return.md) | Modified internal rate of return (MIRR) | Accepted |
-| [0027](0027-amortization-schedule.md) | Amortization schedule as a lazy iterator | Accepted |
+| [0027](0027-amortization-schedule.md) | Amortization schedule as a lazy iterator | Accepted (amended by 0051) |
 | [0028](0028-binary-surface-conventions.md) | Binary surface conventions (CLI grammar & MCP tools) | Accepted |
 | [0029](0029-dated-cashflows-xnpv-xirr.md) | Dated cashflows — XNPV / XIRR | Accepted (amended by 0030) |
 | [0030](0030-shared-day-count-support-crate.md) | Shared day-count support crate | Accepted |
@@ -66,3 +66,7 @@ the old one **Superseded** (link both ways) — don't rewrite the old one.
 | [0045](0045-make-illegal-states-unrepresentable.md) | Make illegal states unrepresentable; test the class, not the instance | Accepted |
 | [0046](0046-thread-safety-of-the-public-types.md) | The public value types are thread-safe (`Send + Sync`), locked by a test | Accepted |
 | [0047](0047-shared-disciplines-across-the-sibling-rust-mcp-repos.md) | Shared disciplines across the sibling Rust MCP repos — a cross-repo index | Accepted |
+| [0048](0048-finite-growing-annuity.md) | The finite growing annuity | Accepted |
+| [0049](0049-growing-annuity-in-the-binaries.md) | The growing annuity in the binaries | Accepted |
+| [0050](0050-role-newtypes-for-ambiguous-arguments.md) | Role newtypes for transposable arguments | Accepted (extends 0005) |
+| [0051](0051-installment-private-fields.md) | `Installment`'s fields are private, read through accessors | Accepted (amends 0027) |

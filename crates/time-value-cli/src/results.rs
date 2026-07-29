@@ -98,11 +98,11 @@ pub(crate) struct ScheduleRow {
 impl From<Installment> for ScheduleRow {
     fn from(installment: Installment) -> Self {
         Self {
-            period: installment.period,
-            payment: installment.payment.value(),
-            interest: installment.interest.value(),
-            principal: installment.principal.value(),
-            balance: installment.balance.value(),
+            period: installment.period(),
+            payment: installment.payment().value(),
+            interest: installment.interest().value(),
+            principal: installment.principal().value(),
+            balance: installment.balance().value(),
         }
     }
 }

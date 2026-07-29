@@ -162,8 +162,8 @@ proptest! {
     ) {
         for installment in amortizing_schedule(rate, principal, slice) {
             prop_assert!(close(
-                installment.interest.value() + installment.principal.value(),
-                installment.payment.value(),
+                installment.interest().value() + installment.principal().value(),
+                installment.payment().value(),
                 1e-9 * principal,
             ));
         }
@@ -191,14 +191,14 @@ proptest! {
         let mut opening = Money::agnostic(principal).unwrap();
         for installment in amortizing_schedule(rate, principal, slice) {
             prop_assert_eq!(
-                installment.interest,
+                installment.interest(),
                 Money::agnostic(opening.value() * rate).unwrap()
             );
             prop_assert_eq!(
-                installment.balance,
-                opening.try_sub(installment.principal).unwrap()
+                installment.balance(),
+                opening.try_sub(installment.principal()).unwrap()
             );
-            opening = installment.balance;
+            opening = installment.balance();
         }
     }
 
@@ -218,8 +218,8 @@ proptest! {
         let mut repaid = 0.0;
         let mut final_balance = None;
         for installment in amortizing_schedule(rate, principal, slice) {
-            repaid += installment.principal.value();
-            final_balance = Some(installment.balance);
+            repaid += installment.principal().value();
+            final_balance = Some(installment.balance());
         }
         // `Some` also witnesses that a positive principal owes at least one
         // installment; an exhausted schedule would leave this `None`.
@@ -240,8 +240,8 @@ proptest! {
     ) {
         let mut previous = Money::agnostic(principal).unwrap();
         for installment in amortizing_schedule(rate, principal, slice) {
-            prop_assert!(installment.balance.value() < previous.value());
-            previous = installment.balance;
+            prop_assert!(installment.balance().value() < previous.value());
+            previous = installment.balance();
         }
         prop_assert_eq!(previous, Money::ZERO);
     }
@@ -533,8 +533,8 @@ proptest! {
         let mut final_balance = None;
         for installment in schedule {
             count += 1;
-            repaid += installment.principal.value();
-            final_balance = Some(installment.balance);
+            repaid += installment.principal().value();
+            final_balance = Some(installment.balance());
         }
         prop_assert_eq!(count, periods);
         prop_assert_eq!(final_balance, Some(Money::ZERO));
