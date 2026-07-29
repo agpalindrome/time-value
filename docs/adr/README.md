@@ -52,7 +52,7 @@ the old one **Superseded** (link both ways) — don't rewrite the old one.
 | [0031](0031-split-non-finite-result-into-overflow-and-undefined.md) | Split `NonFiniteResult` into `Overflow` and `Undefined` | Accepted |
 | [0032](0032-ergonomic-convenience-impls.md) | Ergonomic convenience impls (`ZERO` / `Default` / `TryFrom` / `From`) | Accepted |
 | [0033](0033-core-domain-model-two-axes-and-an-f64-engine.md) | Core domain model — two axes, and an `f64` computation engine | Accepted |
-| [0034](0034-money-and-currency.md) | Money and currency — `f64` magnitude, a runtime ISO-4217 enum, and FX | Accepted (amended by 0053) |
+| [0034](0034-money-and-currency.md) | Money and currency — `f64` magnitude, a runtime ISO-4217 enum, and FX | Accepted (amended by 0053, 0057, 0058) |
 | [0035](0035-periodicity-tagged-time.md) | Periodicity-tagged time (`Period<P>`) | Accepted |
 | [0036](0036-continuous-compounding-force-of-interest.md) | Continuous compounding — a periodicity-free force of interest | Accepted |
 | [0037](0037-currency-in-the-binaries.md) | Currency in the binaries — an opt-in code that is echoed, not rounded | Accepted |
@@ -76,3 +76,4 @@ the old one **Superseded** (link both ways) — don't rewrite the old one.
 | [0055](0055-publish-readiness-of-the-packaged-crate.md) | Publish readiness — what ships in the tarball, and a README that cannot rot | Accepted (amends 0006) |
 | [0056](0056-degenerate-rate-solves.md) | Degenerate rate solves report the degeneracy rather than the scan sentinel | Accepted (amends 0025, 0052) |
 | [0057](0057-currency-is-checked-where-a-result-is-denominated.md) | Currency is checked where a result is denominated — the rate solves do not fold it | Accepted (amends 0034) |
+| [0058](0058-money-display-carries-its-currency.md) | `Money`'s `Display` carries its currency — bare for `XXX`, magnitude then ISO code otherwise | Accepted (amends 0034) |

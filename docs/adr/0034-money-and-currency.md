@@ -1,6 +1,9 @@
 # ADR-0034: Money and currency — `f64` magnitude, a runtime ISO-4217 enum, and FX
 
-- **Status:** Accepted
+- **Status:** Accepted (amended by [0053](0053-fxrate-domain-and-currency-ordering.md),
+  [0057](0057-currency-is-checked-where-a-result-is-denominated.md), and
+  [0058](0058-money-display-carries-its-currency.md) — `Money`'s `Display` now
+  renders the currency it carries; the model below stands)
 - **Date:** 2026-07-14
 - **Deciders:** Project owner
 - **Supersedes:** [ADR-0005](0005-domain-modelling-and-strong-typing.md) §"`Money`

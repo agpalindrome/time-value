@@ -502,11 +502,95 @@ impl PartialOrd for Money {
     }
 }
 
-/// Formats the bare magnitude. Currency-aware formatting (with the code and
-/// minor-unit rounding) is a presentation concern left to the caller.
+/// Formats the magnitude, then — unless the amount is currency-agnostic — a space
+/// and the ISO 4217 code: `100 USD`, `1234.5 JPY`. A [`Currency::Xxx`] amount
+/// prints the bare magnitude, so the pure-number path is byte-for-byte unchanged
+/// (`docs/adr/0058-money-display-carries-its-currency.md`).
+///
+/// Value first, qualifier second, matching every sibling in the crate:
+/// [`Rate`](crate::Rate) prints `0.01 monthly`, `Period` prints `12 monthly`, and
+/// `ContinuousRate` prints `0.05 continuous`.
+///
+/// ```
+/// use time_value::{Currency, Money};
+///
+/// assert_eq!(Money::new(100.0, Currency::Usd)?.to_string(), "100 USD");
+/// assert_eq!(Money::new(1234.5, Currency::Jpy)?.to_string(), "1234.5 JPY");
+///
+/// // The currency-agnostic amount stays a bare number.
+/// assert_eq!(Money::agnostic(100.0)?.to_string(), "100");
+/// assert_eq!(Money::ZERO.to_string(), "0");
+/// # Ok::<(), time_value::TvmError>(())
+/// ```
+///
+/// # No minor-unit rounding
+///
+/// `Display` does **not** round to the currency's minor unit. Rounding is an
+/// explicit, opt-in presentation step — [`Money::round_to_currency`][round]
+/// (ADR-0033, ADR-0034) — so doing it here would silently discard information the
+/// caller never asked to lose, and leave no way to get the full magnitude back out
+/// of the rendering. Ask for the rounding when you want it.
+///
+/// ```
+/// # use time_value::{Currency, Money};
+/// // Two cents is USD's minor unit; the third decimal survives anyway.
+/// assert_eq!(Money::new(2.348, Currency::Usd)?.to_string(), "2.348 USD");
+/// # Ok::<(), time_value::TvmError>(())
+/// ```
+///
+/// # Format specifiers size the magnitude, not the whole rendering
+///
+/// The formatter is forwarded to the `f64` before the code is appended, so
+/// precision (`{:.2}`), sign (`{:+}`), and width/fill/alignment (`{:>10}`,
+/// `{:012}`) all behave exactly as they do on the bare number. The consequence
+/// worth knowing: **padding sizes the number alone**, so a `{:>10}` rendering of a
+/// denominated amount is four characters longer than ten. To lay out a column,
+/// pad the finished string — `format!("{:>10}", money.to_string())`.
+///
+/// Only `Display` is forwarded. `Money` implements neither `LowerExp` nor
+/// `UpperExp`, so `{:e}` does not compile against it; reach for
+/// [`value`](Money::value) when you want the `f64`'s other formatting traits.
+///
+/// ```
+/// # use time_value::{Currency, Money};
+/// let fee = Money::new(1234.5678, Currency::Usd)?;
+///
+/// assert_eq!(format!("{fee:.2}"), "1234.57 USD");
+/// assert_eq!(format!("{fee:+.1}"), "+1234.6 USD");
+///
+/// // The width applies to `1234.6`, and ` USD` follows it.
+/// assert_eq!(format!("{fee:>12.1}"), "      1234.6 USD");
+/// // Padding the rendering instead gives a column of the width asked for.
+/// assert_eq!(format!("{:>12}", format!("{fee:.1}")), "  1234.6 USD");
+/// # Ok::<(), time_value::TvmError>(())
+/// ```
+#[cfg_attr(
+    not(any(feature = "std", feature = "libm")),
+    doc = "
+
+[round]: https://docs.rs/time_value/latest/time_value/struct.Money.html#method.round_to_currency
+"
+)]
+#[cfg_attr(
+    any(feature = "std", feature = "libm"),
+    doc = "
+
+[round]: Money::round_to_currency
+"
+)]
 impl fmt::Display for Money {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.magnitude.fmt(f)
+        // The magnitude goes through the formatter first, so `{:.2}`, `{:+}` and
+        // width/alignment keep applying to the number exactly as they did before
+        // the code was appended (ADR-0058). Rendering into a `String` and writing
+        // *that* would hand the specifier the whole rendering instead — and would
+        // need `alloc`, which the core does not have.
+        self.magnitude.fmt(f)?;
+        if self.currency != Currency::Xxx {
+            f.write_str(" ")?;
+            f.write_str(self.currency.code())?;
+        }
+        Ok(())
     }
 }
 
@@ -616,6 +700,110 @@ mod tests {
         assert_eq!(
             usd.try_add(eur).unwrap_err().to_string(),
             "cannot combine USD with EUR"
+        );
+    }
+
+    /// The currency-agnostic rendering is the bare magnitude — byte-for-byte what
+    /// it was before the code was appended (ADR-0058). The pure-number path is the
+    /// default and by far the most used, so this is the assertion that says the
+    /// change did not reach it.
+    #[test]
+    #[cfg(feature = "alloc")]
+    fn agnostic_money_displays_the_bare_magnitude() {
+        use alloc::string::ToString as _;
+        assert_eq!(Money::agnostic(100.0).unwrap().to_string(), "100");
+        assert_eq!(Money::agnostic(1234.5).unwrap().to_string(), "1234.5");
+        assert_eq!(Money::agnostic(-0.25).unwrap().to_string(), "-0.25");
+        assert_eq!(Money::ZERO.to_string(), "0");
+    }
+
+    /// A denominated amount renders value-then-qualifier, matching `Rate`,
+    /// `Period` and `ContinuousRate` (ADR-0058).
+    #[test]
+    #[cfg(feature = "alloc")]
+    fn denominated_money_displays_its_code_after_the_magnitude() {
+        use alloc::string::ToString as _;
+        assert_eq!(
+            Money::new(100.0, Currency::Usd).unwrap().to_string(),
+            "100 USD"
+        );
+        assert_eq!(
+            Money::new(1234.5, Currency::Jpy).unwrap().to_string(),
+            "1234.5 JPY"
+        );
+        assert_eq!(
+            Money::new(-42.0, Currency::Eur).unwrap().to_string(),
+            "-42 EUR"
+        );
+    }
+
+    /// `Currency` is a small closed set, so iterate it rather than sample
+    /// (ADR-0045 rule 2): every non-`Xxx` code appears exactly once, at the end,
+    /// after the magnitude — and `Xxx` appears not at all.
+    #[test]
+    #[cfg(feature = "alloc")]
+    fn every_currency_appends_its_code_exactly_once_except_xxx() {
+        use alloc::format;
+        for currency in Currency::ALL {
+            let rendered = format!("{}", Money::new(12.5, *currency).unwrap());
+            let code = currency.code();
+            if *currency == Currency::Xxx {
+                assert_eq!(rendered, "12.5", "{code} should render bare");
+            } else {
+                assert_eq!(rendered, format!("12.5 {code}"));
+                assert_eq!(
+                    rendered.matches(code).count(),
+                    1,
+                    "{code} should appear exactly once in `{rendered}`"
+                );
+            }
+        }
+    }
+
+    /// `Display` never applies minor-unit rounding — that is
+    /// `round_to_currency`'s opt-in job (ADR-0058). `USD` has two minor digits and
+    /// `JPY` none, and neither loses a decimal here.
+    #[test]
+    #[cfg(feature = "alloc")]
+    fn display_does_not_round_to_the_minor_unit() {
+        use alloc::string::ToString as _;
+        assert_eq!(
+            Money::new(2.348, Currency::Usd).unwrap().to_string(),
+            "2.348 USD"
+        );
+        assert_eq!(
+            Money::new(1234.9, Currency::Jpy).unwrap().to_string(),
+            "1234.9 JPY"
+        );
+    }
+
+    /// The formatter is forwarded to the `f64`, so a specifier keeps applying to
+    /// the magnitude and the code is appended after it (ADR-0058). Building a
+    /// `String` and writing *that* would break every case below.
+    #[test]
+    #[cfg(feature = "alloc")]
+    fn format_specifiers_apply_to_the_magnitude() {
+        use alloc::format;
+        let fee = Money::new(1234.5678, Currency::Usd).unwrap();
+
+        assert_eq!(format!("{fee:.2}"), "1234.57 USD");
+        assert_eq!(format!("{fee:.0}"), "1235 USD");
+        assert_eq!(format!("{fee:+.1}"), "+1234.6 USD");
+
+        // Width and alignment size the number, not the whole rendering — the
+        // documented wart. Twelve characters of number, then ` USD`.
+        assert_eq!(format!("{fee:>12.1}"), "      1234.6 USD");
+        assert_eq!(format!("{fee:<12.1}"), "1234.6       USD");
+        assert_eq!(format!("{fee:^12.1}"), "   1234.6    USD");
+        assert_eq!(format!("{fee:012.1}"), "0000001234.6 USD");
+
+        // Padding the finished rendering is how a caller gets a real column.
+        assert_eq!(format!("{:>12}", format!("{fee:.1}")), "  1234.6 USD");
+
+        // The agnostic path keeps the plain `f64` behaviour untouched.
+        assert_eq!(
+            format!("{:>10.2}", Money::agnostic(1234.5678).unwrap()),
+            "   1234.57"
         );
     }
 
