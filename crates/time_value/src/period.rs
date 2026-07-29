@@ -102,7 +102,8 @@ impl<P: Periodicity> Period<P> {
     /// [`Money::from_operation`](crate::Money) and [`Rate::from_operation`] (per
     /// ADR-0021, ADR-0031); the mathematically undefined solves (a zero rate, a
     /// non-positive logarithm argument) are guarded at their call sites and return
-    /// [`TvmError::Undefined`] before reaching here. A finite negative count — a
+    /// [`TvmError::NoRealSolution`] or [`TvmError::PaymentDoesNotAmortize`] before
+    /// reaching here (ADR-0052). A finite negative count — a
     /// period count solved into the past — is [`TvmError::NegativePeriods`], the
     /// same variant [`new`](Self::new) uses.
     ///

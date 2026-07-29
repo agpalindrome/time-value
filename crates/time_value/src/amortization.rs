@@ -173,9 +173,14 @@ impl<P: Periodicity> Schedule<P> {
     ///
     /// # Errors
     ///
-    /// [`TvmError::Undefined`] if `payment` cannot amortise `principal` — it
-    /// does not exceed the first period's interest, so the balance would never
-    /// fall and no finite schedule exists (ADR-0027, ADR-0031).
+    /// - [`TvmError::PaymentDoesNotAmortize`] if `payment` cannot amortise
+    ///   `principal` — it does not exceed the first period's interest, so the
+    ///   balance would never fall and no finite schedule exists (ADR-0027,
+    ///   ADR-0031, ADR-0052). This is the same condition
+    ///   [`annuity::periods`](crate::annuity::periods) rejects.
+    /// - [`TvmError::CurrencyMismatch`] if `payment` and `principal` are in
+    ///   distinct non-`Xxx` currencies, so the schedule has no single
+    ///   denomination (ADR-0034).
     pub fn with_payment(
         rate: Rate<P>,
         payment: Payment,
@@ -186,7 +191,7 @@ impl<P: Periodicity> Schedule<P> {
         // amortises a positive balance. (A non-positive balance is an empty
         // schedule, handled by `next`.)
         if principal.value() > 0.0 && payment.value() <= principal.value() * rate.value() {
-            return Err(TvmError::Undefined);
+            return Err(TvmError::PaymentDoesNotAmortize);
         }
         Ok(Self {
             balance: principal.value(),
@@ -224,8 +229,10 @@ impl<P: Periodicity> Schedule<P> {
     ///
     /// # Errors
     ///
-    /// As [`annuity::payment`](crate::annuity::payment) — [`TvmError::Undefined`]
-    /// if `periods` is zero (nothing to amortise over).
+    /// As [`annuity::payment`](crate::annuity::payment) — [`TvmError::ZeroPeriods`]
+    /// if `periods` is zero (nothing to amortise over) — then as
+    /// [`with_payment`](Self::with_payment) for the sized payment, which can add
+    /// [`TvmError::CurrencyMismatch`] (ADR-0052).
     pub fn for_term(
         rate: Rate<P>,
         periods: crate::Period<P>,
@@ -339,7 +346,27 @@ mod tests {
                 Principal(Money::agnostic(1000.0).unwrap())
             )
             .map(Schedule::count),
-            Err(TvmError::Undefined),
+            Err(TvmError::PaymentDoesNotAmortize),
+        );
+    }
+
+    /// `with_payment` folds the two amounts' currencies together, so its
+    /// `# Errors` names `CurrencyMismatch`; pin it (ADR-0045 rule 2, ADR-0052).
+    #[test]
+    fn a_payment_and_principal_in_distinct_currencies_are_a_mismatch() {
+        use crate::Currency;
+        assert_eq!(
+            Schedule::with_payment(
+                rate(0.10),
+                Payment(Money::new(500.0, Currency::Eur).unwrap()),
+                Principal(Money::new(1000.0, Currency::Usd).unwrap()),
+            )
+            .map(Schedule::count),
+            // `combine(principal, payment)`, in that order.
+            Err(TvmError::CurrencyMismatch {
+                left: Currency::Usd,
+                right: Currency::Eur,
+            }),
         );
     }
 
@@ -385,7 +412,7 @@ mod tests {
             assert_eq!(
                 Schedule::for_term(rate(0.01), Period::ZERO, Money::agnostic(1000.0).unwrap())
                     .map(Schedule::count),
-                Err(crate::TvmError::Undefined),
+                Err(crate::TvmError::ZeroPeriods),
             );
         }
     }

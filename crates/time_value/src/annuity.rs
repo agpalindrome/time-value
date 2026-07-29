@@ -195,10 +195,10 @@ pub fn future_value<P: Periodicity>(
 ///
 /// # Errors
 ///
-/// Returns [`TvmError::Undefined`] if the amortisation is degenerate — in
-/// particular when `periods` is zero, so there is nothing to amortise over and
-/// the payment has no answer (the factor is `0`) — or [`TvmError::Overflow`] if
-/// the division overflows on extreme magnitudes (ADR-0021, ADR-0031).
+/// Returns [`TvmError::ZeroPeriods`] if `periods` is zero, so there is nothing to
+/// amortise over and the payment has no answer (the factor is `0`), or
+/// [`TvmError::Overflow`] if the division overflows on extreme magnitudes
+/// (ADR-0021, ADR-0031, ADR-0052).
 pub fn payment<P: Periodicity>(
     rate: Rate<P>,
     periods: Period<P>,
@@ -207,7 +207,7 @@ pub fn payment<P: Periodicity>(
     if periods.value() == 0.0 {
         // Nothing to amortise over: the annuity factor is 0, so the payment is
         // undefined rather than merely too large.
-        return Err(TvmError::Undefined);
+        return Err(TvmError::ZeroPeriods);
     }
     let factor = present_value_factor(rate.value(), periods.value());
     Money::from_operation(present.value() / factor, present.currency())
@@ -421,10 +421,12 @@ pub fn growing_future_value<P: Periodicity>(
 ///
 /// # Errors
 ///
-/// [`TvmError::Undefined`] if the payment never retires the balance — when
-/// `PMT ≤ PV·r`, the payment does not even cover the period's interest, so the
+/// [`TvmError::PaymentDoesNotAmortize`] if the payment never retires the balance —
+/// when `PMT ≤ PV·r`, the payment does not even cover the period's interest, so the
 /// logarithm's argument is non-positive and `n` has no answer (likewise a zero
-/// payment). [`NegativePeriods`] if the solved `n` is negative.
+/// payment, which retires nothing at any rate). This is the same condition
+/// [`Schedule::with_payment`](crate::amortization::Schedule::with_payment) rejects
+/// (ADR-0052). [`NegativePeriods`] if the solved `n` is negative.
 ///
 /// [`NegativePeriods`]: TvmError::NegativePeriods
 pub fn periods<P: Periodicity>(
@@ -436,7 +438,9 @@ pub fn periods<P: Periodicity>(
     let r = rate.value();
     let n = if near_zero(r) {
         if payment.value() == 0.0 {
-            return Err(TvmError::Undefined);
+            // No interest accrues, but a zero payment still never retires a
+            // balance.
+            return Err(TvmError::PaymentDoesNotAmortize);
         }
         present.value() / payment.value()
     } else {
@@ -444,7 +448,7 @@ pub fn periods<P: Periodicity>(
         if arg <= 0.0 || arg.is_nan() {
             // PMT ≤ PV·r (or a zero payment): the logarithm's argument is
             // non-positive, so no finite number of payments retires the balance.
-            return Err(TvmError::Undefined);
+            return Err(TvmError::PaymentDoesNotAmortize);
         }
         -ln(arg) / ln(1.0 + r)
     };
@@ -485,9 +489,12 @@ pub fn periods<P: Periodicity>(
 ///
 /// # Errors
 ///
-/// [`TvmError::Undefined`] if `1 + FV·r / PMT` is non-positive (no real
-/// logarithm) or the payment is zero, or [`TvmError::NegativePeriods`] if the
-/// solved `n` is negative.
+/// [`TvmError::NoRealSolution`] if `1 + FV·r / PMT` is non-positive (no real
+/// logarithm — the payment and the target are inconsistent in sign or magnitude)
+/// or the payment is zero (nothing accumulates), or
+/// [`TvmError::NegativePeriods`] if the solved `n` is negative. Unlike
+/// [`periods`], nothing here is being *amortised*, so there is no interest
+/// threshold to name (ADR-0052).
 pub fn periods_from_future<P: Periodicity>(
     rate: Rate<P>,
     payment: Payment,
@@ -497,13 +504,16 @@ pub fn periods_from_future<P: Periodicity>(
     let r = rate.value();
     let n = if near_zero(r) {
         if payment.value() == 0.0 {
-            return Err(TvmError::Undefined);
+            // No interest and no contribution: nothing ever accumulates.
+            return Err(TvmError::NoRealSolution);
         }
         future.value() / payment.value()
     } else {
         let arg = 1.0 + future.value() * r / payment.value();
         if arg <= 0.0 || arg.is_nan() {
-            return Err(TvmError::Undefined);
+            // The logarithm's argument is non-positive: these contributions never
+            // reach that target.
+            return Err(TvmError::NoRealSolution);
         }
         ln(arg) / ln(1.0 + r)
     };
@@ -717,17 +727,16 @@ pub mod due {
     ///
     /// # Errors
     ///
-    /// Returns [`TvmError::Undefined`] if the amortisation is degenerate — in
-    /// particular when `periods` is zero, so the factor is `0` and the payment has
-    /// no answer — or [`TvmError::Overflow`] if the division overflows on extreme
-    /// magnitudes (ADR-0021, ADR-0031).
+    /// Returns [`TvmError::ZeroPeriods`] if `periods` is zero, so the factor is `0`
+    /// and the payment has no answer, or [`TvmError::Overflow`] if the division
+    /// overflows on extreme magnitudes (ADR-0021, ADR-0031, ADR-0052).
     pub fn payment<P: Periodicity>(
         rate: Rate<P>,
         periods: Period<P>,
         present: Money,
     ) -> Result<Money, TvmError> {
         if periods.value() == 0.0 {
-            return Err(TvmError::Undefined);
+            return Err(TvmError::ZeroPeriods);
         }
         let factor = present_value_factor(rate.value(), periods.value()) * (1.0 + rate.value());
         Money::from_operation(present.value() / factor, present.currency())
@@ -893,7 +902,7 @@ mod tests {
     #[test]
     fn payment_over_zero_periods_is_degenerate() {
         let result = annuity::payment(rate(0.01), Period::ZERO, Money::agnostic(1000.0).unwrap());
-        assert_eq!(result, Err(TvmError::Undefined));
+        assert_eq!(result, Err(TvmError::ZeroPeriods));
     }
 
     #[test]
@@ -948,7 +957,7 @@ mod tests {
     fn due_payment_over_zero_periods_is_degenerate() {
         let result =
             annuity::due::payment(rate(0.01), Period::ZERO, Money::agnostic(1000.0).unwrap());
-        assert_eq!(result, Err(TvmError::Undefined));
+        assert_eq!(result, Err(TvmError::ZeroPeriods));
     }
 
     #[test]
@@ -1037,16 +1046,57 @@ mod tests {
     }
 
     #[test]
-    fn periods_when_payment_cannot_cover_interest_is_undefined() {
+    fn periods_when_payment_cannot_cover_interest_does_not_amortise() {
         // 5% on a 10000 balance is 500/period, but the payment is only 100, so the
-        // balance never amortises: n is undefined.
+        // balance never falls: there is no n.
         assert_eq!(
             annuity::periods(
                 rate(0.05),
                 Payment(Money::agnostic(100.0).unwrap()),
                 PresentValue(Money::agnostic(10_000.0).unwrap()),
             ),
-            Err(TvmError::Undefined)
+            Err(TvmError::PaymentDoesNotAmortize)
+        );
+    }
+
+    #[test]
+    fn periods_with_a_zero_payment_does_not_amortise() {
+        // The `r → 0` branch: no interest accrues, but paying nothing still never
+        // retires a balance (ADR-0052).
+        assert_eq!(
+            annuity::periods(
+                rate(0.0),
+                Payment(Money::ZERO),
+                PresentValue(Money::agnostic(1000.0).unwrap()),
+            ),
+            Err(TvmError::PaymentDoesNotAmortize)
+        );
+    }
+
+    #[test]
+    fn periods_from_future_with_no_real_logarithm_has_no_solution() {
+        // Contributing -100/period cannot reach +1268 at 1%: `1 + FV·r/PMT` is
+        // negative, so the logarithm has no real value (ADR-0052).
+        assert_eq!(
+            annuity::periods_from_future(
+                rate(0.01),
+                Payment(Money::agnostic(-100.0).unwrap()),
+                FutureValue(Money::agnostic(1_268_250.0).unwrap()),
+            ),
+            Err(TvmError::NoRealSolution)
+        );
+    }
+
+    #[test]
+    fn periods_from_future_with_a_zero_payment_has_no_solution() {
+        // The `r → 0` branch: nothing ever accumulates (ADR-0052).
+        assert_eq!(
+            annuity::periods_from_future(
+                rate(0.0),
+                Payment(Money::ZERO),
+                FutureValue(Money::agnostic(1000.0).unwrap()),
+            ),
+            Err(TvmError::NoRealSolution)
         );
     }
 

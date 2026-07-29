@@ -19,11 +19,12 @@ use crate::{Currency, TvmError};
 /// Every `Money` is finite. The [`new`](Money::new) constructor rejects `NaN`
 /// and the infinities, and every operation that could leave the finite range —
 /// the TVM operations and the arithmetic below — returns a `Result` whose `Err`
-/// is [`TvmError::Overflow`] (a real result too large for `f64`), or
-/// [`TvmError::Undefined`] for a degenerate case such as division by zero,
-/// rather than a non-finite `Money`
+/// is [`TvmError::Overflow`] (a real result too large for `f64`), or a named
+/// degenerate case such as [`TvmError::DivisionByZero`], rather than a non-finite
+/// `Money`
 /// (`docs/adr/0021-fallible-operations-on-non-finite-results.md`,
-/// `docs/adr/0031-split-non-finite-result-into-overflow-and-undefined.md`).
+/// `docs/adr/0031-split-non-finite-result-into-overflow-and-undefined.md`,
+/// `docs/adr/0052-tvmerror-variant-granularity.md`).
 ///
 /// Cashflows are signed — an outflow is negative, an inflow positive.
 ///
@@ -122,9 +123,10 @@ impl Money {
     ///
     /// This is the overflow funnel: a non-finite result reaching here is a real
     /// value that exceeded the representable `f64` range, so it is
-    /// [`TvmError::Overflow`]. Mathematically undefined cases (e.g. an annuity
-    /// payment over zero periods) are guarded at their call sites and return
-    /// [`TvmError::Undefined`] before reaching this point (ADR-0021, ADR-0031).
+    /// [`TvmError::Overflow`]. Mathematically degenerate cases (e.g. an annuity
+    /// payment over zero periods) are guarded at their call sites and return their
+    /// own named variant — [`TvmError::ZeroPeriods`] and the rest — before reaching
+    /// this point (ADR-0021, ADR-0031, ADR-0052).
     /// Both are distinct from the [`TvmError::NonFiniteAmount`] that
     /// [`new`](Self::new) returns for a non-finite value supplied by a *caller*.
     pub(crate) fn from_operation(amount: f64, currency: Currency) -> Result<Self, TvmError> {
@@ -167,12 +169,12 @@ impl Money {
     ///
     /// # Errors
     ///
-    /// Returns [`TvmError::Undefined`] if `factor` is itself `NaN` or infinite (no
-    /// finite product is defined), or [`TvmError::Overflow`] if a finite factor
+    /// Returns [`TvmError::NonFiniteScalar`] if `factor` is itself `NaN` or infinite
+    /// (no finite product is defined), or [`TvmError::Overflow`] if a finite factor
     /// pushes the product past the representable range.
     pub fn try_mul(self, factor: f64) -> Result<Self, TvmError> {
         if !factor.is_finite() {
-            return Err(TvmError::Undefined);
+            return Err(TvmError::NonFiniteScalar);
         }
         Self::from_operation(self.magnitude * factor, self.currency)
     }
@@ -182,13 +184,17 @@ impl Money {
     ///
     /// # Errors
     ///
-    /// Returns [`TvmError::Undefined`] if `divisor` is zero or `NaN` (the quotient
-    /// has no defined value), or [`TvmError::Overflow`] if dividing a large amount
-    /// by a tiny one leaves the finite range. An *infinite* divisor is not an
-    /// error: the quotient is zero, which is finite.
+    /// Returns [`TvmError::DivisionByZero`] if `divisor` is zero (the quotient has
+    /// no defined value, including `0 / 0`), [`TvmError::NonFiniteScalar`] if it is
+    /// `NaN`, or [`TvmError::Overflow`] if dividing a large amount by a tiny one
+    /// leaves the finite range. An *infinite* divisor is not an error: the quotient
+    /// is zero, which is finite.
     pub fn try_div(self, divisor: f64) -> Result<Self, TvmError> {
-        if divisor == 0.0 || divisor.is_nan() {
-            return Err(TvmError::Undefined);
+        if divisor == 0.0 {
+            return Err(TvmError::DivisionByZero);
+        }
+        if divisor.is_nan() {
+            return Err(TvmError::NonFiniteScalar);
         }
         Self::from_operation(self.magnitude / divisor, self.currency)
     }
@@ -263,7 +269,10 @@ impl Money {
     /// ```
     pub fn convert(self, fx: FxRate) -> Result<Self, TvmError> {
         if self.currency != fx.from {
-            return Err(TvmError::CurrencyMismatch);
+            return Err(TvmError::CurrencyMismatch {
+                left: self.currency,
+                right: fx.from,
+            });
         }
         Self::from_operation(self.magnitude * fx.rate, fx.to)
     }
@@ -274,11 +283,16 @@ impl Money {
 /// and two distinct non-`Xxx` currencies are a mismatch. Shared with the series
 /// operations, which fold it over their flows to find the one currency a monetary
 /// result is denominated in.
+///
+/// A mismatch names both currencies — `CurrencyMismatch { left: a, right: b }` —
+/// so a caller can report which two clashed (ADR-0052). When folded over a series,
+/// `left` is the currency accumulated from the flows so far and `right` is the
+/// offending flow's.
 pub(crate) fn combine(a: Currency, b: Currency) -> Result<Currency, TvmError> {
     match (a, b) {
         (Currency::Xxx, other) | (other, Currency::Xxx) => Ok(other),
         _ if a == b => Ok(a),
-        _ => Err(TvmError::CurrencyMismatch),
+        _ => Err(TvmError::CurrencyMismatch { left: a, right: b }),
     }
 }
 
@@ -505,8 +519,35 @@ mod tests {
     fn distinct_currencies_are_a_mismatch() {
         let usd = Money::new(100.0, Currency::Usd).unwrap();
         let eur = Money::new(100.0, Currency::Eur).unwrap();
-        assert_eq!(usd.try_add(eur), Err(TvmError::CurrencyMismatch));
-        assert_eq!(usd.try_sub(eur), Err(TvmError::CurrencyMismatch));
+        // The error names *both* currencies, in the order the operation combined
+        // them, so a caller can report which two clashed (ADR-0052).
+        let mismatch = TvmError::CurrencyMismatch {
+            left: Currency::Usd,
+            right: Currency::Eur,
+        };
+        assert_eq!(usd.try_add(eur), Err(mismatch.clone()));
+        assert_eq!(usd.try_sub(eur), Err(mismatch));
+        assert_eq!(
+            eur.try_add(usd),
+            Err(TvmError::CurrencyMismatch {
+                left: Currency::Eur,
+                right: Currency::Usd,
+            })
+        );
+    }
+
+    /// The payload is not merely carried — it reaches the rendered message
+    /// (ADR-0045 rule 2: an assertion in the docs earns a test).
+    #[test]
+    #[cfg(feature = "alloc")]
+    fn a_currency_mismatch_names_both_currencies_when_displayed() {
+        use alloc::string::ToString as _;
+        let usd = Money::new(100.0, Currency::Usd).unwrap();
+        let eur = Money::new(100.0, Currency::Eur).unwrap();
+        assert_eq!(
+            usd.try_add(eur).unwrap_err().to_string(),
+            "cannot combine USD with EUR"
+        );
     }
 
     #[test]
@@ -527,15 +568,15 @@ mod tests {
     #[test]
     fn mul_rejects_a_non_finite_result() {
         // A finite factor that overflows the range is an Overflow; a non-finite
-        // factor has no defined product, so it is Undefined (ADR-0031).
+        // factor is a bad *input*, so it is NonFiniteScalar (ADR-0031, ADR-0052).
         assert_eq!(huge().try_mul(2.0), Err(TvmError::Overflow));
         assert_eq!(
             Money::agnostic(1.0).unwrap().try_mul(f64::INFINITY),
-            Err(TvmError::Undefined)
+            Err(TvmError::NonFiniteScalar)
         );
         assert_eq!(
             Money::agnostic(1.0).unwrap().try_mul(f64::NAN),
-            Err(TvmError::Undefined)
+            Err(TvmError::NonFiniteScalar)
         );
     }
 
@@ -552,12 +593,13 @@ mod tests {
     #[test]
     fn div_rejects_a_non_finite_result() {
         let total = Money::agnostic(3000.0).unwrap();
-        // Division by zero or NaN is undefined; a finite divisor that overflows
-        // the range is an Overflow (ADR-0031).
-        assert_eq!(total.try_div(0.0), Err(TvmError::Undefined));
-        assert_eq!(total.try_div(f64::NAN), Err(TvmError::Undefined));
+        // A zero divisor and a NaN divisor are different faults and now say so;
+        // a finite divisor that overflows the range is an Overflow (ADR-0052).
+        assert_eq!(total.try_div(0.0), Err(TvmError::DivisionByZero));
+        assert_eq!(total.try_div(-0.0), Err(TvmError::DivisionByZero));
+        assert_eq!(total.try_div(f64::NAN), Err(TvmError::NonFiniteScalar));
         // 0 / 0 is undefined, not zero.
-        assert_eq!(Money::ZERO.try_div(0.0), Err(TvmError::Undefined));
+        assert_eq!(Money::ZERO.try_div(0.0), Err(TvmError::DivisionByZero));
         assert_eq!(huge().try_div(0.5), Err(TvmError::Overflow));
     }
 
@@ -664,7 +706,14 @@ mod tests {
     fn fx_convert_requires_matching_from_currency() {
         let eur = Money::new(100.0, Currency::Eur).unwrap();
         let fx = crate::FxRate::new(Currency::Usd, Currency::Gbp, 0.8).unwrap();
-        assert_eq!(eur.convert(fx), Err(TvmError::CurrencyMismatch));
+        // `left` is the amount's own currency, `right` the rate's `from` (ADR-0052).
+        assert_eq!(
+            eur.convert(fx),
+            Err(TvmError::CurrencyMismatch {
+                left: Currency::Eur,
+                right: Currency::Usd,
+            })
+        );
     }
 
     #[test]

@@ -70,3 +70,4 @@ the old one **Superseded** (link both ways) — don't rewrite the old one.
 | [0049](0049-growing-annuity-in-the-binaries.md) | The growing annuity in the binaries | Accepted |
 | [0050](0050-role-newtypes-for-ambiguous-arguments.md) | Role newtypes for transposable arguments | Accepted (extends 0005) |
 | [0051](0051-installment-private-fields.md) | `Installment`'s fields are private, read through accessors | Accepted (amends 0027) |
+| [0052](0052-tvmerror-variant-granularity.md) | `TvmError` variant granularity — a payload on `CurrencyMismatch`, `Undefined` split | Accepted (amends 0004, 0031) |

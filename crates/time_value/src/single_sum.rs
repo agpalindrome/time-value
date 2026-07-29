@@ -118,8 +118,9 @@ pub fn future_value<P: Periodicity>(
 ///
 /// # Errors
 ///
-/// - [`TvmError::Undefined`] if `rate` is zero (no growth, so `n` is undefined)
-///   or `future / present` is not a positive finite number (no real logarithm).
+/// - [`TvmError::NoRealSolution`] if `rate` is zero (nothing grows, so no `n`
+///   reaches `future`) or `future / present` is not a positive finite number
+///   (including a zero `present`), so the logarithm has no real value (ADR-0052).
 /// - [`TvmError::NegativePeriods`] if the solved `n` is negative — `future` lies
 ///   *before* `present` at this rate (e.g. `future < present` with a positive
 ///   rate).
@@ -130,8 +131,10 @@ pub fn periods<P: Periodicity>(
 ) -> Result<Period<P>, TvmError> {
     let ratio = future.money().value() / present.money().value();
     if rate.value() == 0.0 || !ratio.is_finite() || ratio <= 0.0 {
-        // No growth (rate 0), or a ratio with no real logarithm: `n` is undefined.
-        return Err(TvmError::Undefined);
+        // No growth (rate 0), or a ratio with no real logarithm: the solve has no
+        // real answer. Both conditions share a variant because both mean exactly
+        // that — there is no `n`, for different arithmetic reasons (ADR-0052).
+        return Err(TvmError::NoRealSolution);
     }
     let n = ln(ratio) / ln(1.0 + rate.value());
     Period::from_operation(n)
@@ -161,8 +164,8 @@ pub fn periods<P: Periodicity>(
 ///
 /// # Errors
 ///
-/// - [`TvmError::Undefined`] if `periods` is zero (no elapsed time, so the rate
-///   is undefined).
+/// - [`TvmError::ZeroPeriods`] if `periods` is zero (no elapsed time, so no rate
+///   is implied) — ADR-0052.
 /// - [`TvmError::Overflow`] if the power overflows on extreme magnitudes.
 /// - [`TvmError::RateOutOfRange`] if the implied growth factor `(FV / PV)^(1/n)`
 ///   is non-positive — e.g. `future / present` is negative — so the rate would be
@@ -173,7 +176,7 @@ pub fn rate<P: Periodicity>(
     future: FutureValue,
 ) -> Result<Rate<P>, TvmError> {
     if periods.value() <= 0.0 {
-        return Err(TvmError::Undefined);
+        return Err(TvmError::ZeroPeriods);
     }
     let growth = powf(
         future.money().value() / present.money().value(),
@@ -270,7 +273,7 @@ mod tests {
     }
 
     #[test]
-    fn periods_with_zero_rate_is_undefined() {
+    fn periods_with_zero_rate_has_no_real_solution() {
         // No growth, so no finite n maps 1000 to 2000.
         let rate = Rate::<Monthly>::new(0.0).unwrap();
         assert_eq!(
@@ -279,7 +282,30 @@ mod tests {
                 PresentValue(Money::agnostic(1000.0).unwrap()),
                 FutureValue(Money::agnostic(2000.0).unwrap())
             ),
-            Err(TvmError::Undefined)
+            Err(TvmError::NoRealSolution)
+        );
+    }
+
+    #[test]
+    fn periods_with_a_non_positive_ratio_has_no_real_solution() {
+        // ln(FV/PV) needs a positive ratio: a sign flip, or a zero `present`
+        // (an infinite ratio), has no real answer (ADR-0052).
+        let rate = Rate::<Monthly>::new(0.01).unwrap();
+        assert_eq!(
+            periods(
+                rate,
+                PresentValue(Money::agnostic(1000.0).unwrap()),
+                FutureValue(Money::agnostic(-2000.0).unwrap())
+            ),
+            Err(TvmError::NoRealSolution)
+        );
+        assert_eq!(
+            periods(
+                rate,
+                PresentValue(Money::ZERO),
+                FutureValue(Money::agnostic(2000.0).unwrap())
+            ),
+            Err(TvmError::NoRealSolution)
         );
     }
 
@@ -298,14 +324,14 @@ mod tests {
     }
 
     #[test]
-    fn rate_over_zero_periods_is_undefined() {
+    fn rate_over_zero_periods_is_a_zero_term() {
         assert_eq!(
             solve_rate::<Monthly>(
                 Period::ZERO,
                 PresentValue(Money::agnostic(1000.0).unwrap()),
                 FutureValue(Money::agnostic(2000.0).unwrap()),
             ),
-            Err(TvmError::Undefined)
+            Err(TvmError::ZeroPeriods)
         );
     }
 }
