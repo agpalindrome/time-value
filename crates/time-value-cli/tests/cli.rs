@@ -567,7 +567,9 @@ fn amortize_requires_periods_or_payment() {
 
 #[test]
 fn amortize_rejects_a_non_amortizing_payment() {
-    // A payment below the first period's interest never retires the balance.
+    // A payment below the first period's interest never retires the balance. The
+    // message names *that* condition rather than a generic "undefined": the
+    // library's `PaymentDoesNotAmortize` reaches the user (ADR-0052).
     time_value()
         .args([
             "amortize",
@@ -580,7 +582,27 @@ fn amortize_rejects_a_non_amortizing_payment() {
         ])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("undefined"));
+        .stderr(predicate::str::contains("amortization schedule"))
+        .stderr(predicate::str::contains("never amortised"));
+}
+
+#[test]
+fn amortize_over_a_zero_term_names_the_zero_term() {
+    // The other degenerate amortization case, now told apart from the one above
+    // (ADR-0052): a zero term has nothing to amortise over.
+    time_value()
+        .args([
+            "amortize",
+            "--rate",
+            "0.01",
+            "--principal",
+            "1000",
+            "--periods",
+            "0",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("at least one period"));
 }
 
 #[test]

@@ -32,7 +32,8 @@ fn close(a: f64, b: f64, tolerance: f64) -> bool {
 /// principal, so it always clears that period's interest and the balance must
 /// fall. This keeps the generators inside [`Schedule::with_payment`]'s defined
 /// domain — a payment at or below the first period's interest is
-/// [`TvmError::Undefined`](time_value::TvmError::Undefined), not a schedule.
+/// [`TvmError::PaymentDoesNotAmortize`](time_value::TvmError::PaymentDoesNotAmortize),
+/// not a schedule.
 ///
 /// The slice is bounded below (5% of the principal per period), which also bounds
 /// the schedule's length: the term runs to about `−ln(slice / (rate + slice)) /

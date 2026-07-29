@@ -193,14 +193,43 @@ pub enum TvmError {
     NonFiniteRate,
     /// A monetary amount supplied to a constructor was not finite (`NaN` or an
     /// infinity). For a non-finite value *produced by an operation*, see
-    /// [`Overflow`](Self::Overflow) and [`Undefined`](Self::Undefined).
+    /// [`Overflow`](Self::Overflow).
     NonFiniteAmount,
+    /// A plain-`f64` scalar operand supplied to [`Money`] arithmetic was not finite
+    /// — the factor given to [`Money::try_mul`], or a `NaN` divisor given to
+    /// [`Money::try_div`]. There is no defined product or quotient, so this is a
+    /// caller's bad input, alongside
+    /// [`NonFiniteAmount`](Self::NonFiniteAmount)/[`NonFiniteRate`](Self::NonFiniteRate)
+    /// /[`NonFiniteOffset`](Self::NonFiniteOffset), rather than a degenerate result
+    /// (ADR-0052). An *infinite* divisor is not an error: the quotient is zero.
+    NonFiniteScalar,
     /// An arithmetic or TVM operation combined two amounts denominated in distinct
-    /// non-[`Xxx`](Currency::Xxx) currencies. An agnostic [`Xxx`](Currency::Xxx)
+    /// non-[`Xxx`](Currency::Xxx) currencies, named here as `left` and `right` in
+    /// the order the operation combined them. An agnostic [`Xxx`](Currency::Xxx)
     /// amount adopts the currency it is combined with, but two different real
     /// currencies cannot be added, subtracted, or discounted together
     /// (`docs/adr/0034-money-and-currency.md`).
-    CurrencyMismatch,
+    ///
+    /// For [`Money::convert`], `left` is the amount's own currency and `right` is
+    /// the [`FxRate`]'s [`from`](FxRate::from) currency, which it must match.
+    ///
+    /// ```
+    /// use time_value::{Currency, Money, TvmError};
+    ///
+    /// let usd = Money::new(1.0, Currency::Usd)?;
+    /// let eur = Money::new(1.0, Currency::Eur)?;
+    /// assert_eq!(
+    ///     usd.try_add(eur),
+    ///     Err(TvmError::CurrencyMismatch { left: Currency::Usd, right: Currency::Eur }),
+    /// );
+    /// # Ok::<(), time_value::TvmError>(())
+    /// ```
+    CurrencyMismatch {
+        /// The currency of the left-hand operand.
+        left: Currency,
+        /// The currency of the right-hand operand.
+        right: Currency,
+    },
     /// An exchange rate supplied to [`FxRate::new`](crate::FxRate::new) was not
     /// finite or was not strictly positive; a non-positive price has no economic
     /// meaning (ADR-0034).
@@ -208,19 +237,48 @@ pub enum TvmError {
     /// An operation's `f64` arithmetic overflowed the finite range — a genuine
     /// result exists mathematically but is too large to represent, so it became an
     /// infinity or `NaN` (e.g. compounding an enormous rate over a long horizon).
-    /// Distinct from [`Undefined`](Self::Undefined), where the operation has no
-    /// answer for the inputs at all, and from
-    /// [`NonFiniteAmount`](Self::NonFiniteAmount), a non-finite value passed *in*
-    /// (ADR-0021, ADR-0031).
+    /// Distinct from the *degenerate* variants below — [`ZeroPeriods`](Self::ZeroPeriods),
+    /// [`PaymentDoesNotAmortize`](Self::PaymentDoesNotAmortize),
+    /// [`NoRealSolution`](Self::NoRealSolution), [`NoOutflows`](Self::NoOutflows),
+    /// [`DivisionByZero`](Self::DivisionByZero) — where the operation has no answer
+    /// for the inputs at all, and from [`NonFiniteAmount`](Self::NonFiniteAmount), a
+    /// non-finite value passed *in* (ADR-0021, ADR-0031, ADR-0052).
     Overflow,
-    /// An operation is mathematically undefined for the given inputs — a
-    /// degenerate case with no answer, not an overflow of a real one. Examples:
-    /// an [`annuity::payment`] over zero periods (nothing to amortise over), a
-    /// solved period count whose logarithm has a non-positive argument, or a
-    /// [`Cashflows::modified_internal_rate_of_return`] on a series with no span or
-    /// no outflows. Distinct from [`Overflow`](Self::Overflow), which is a real
-    /// result that exceeds `f64` range (ADR-0031).
-    Undefined,
+    /// An amount was divided by zero (or by `NaN`) in [`Money::try_div`]: the
+    /// quotient has no defined value, including `0 / 0`. Distinct from
+    /// [`Overflow`](Self::Overflow), which is a real quotient too large to
+    /// represent (ADR-0052).
+    DivisionByZero,
+    /// An operation that needs a strictly positive term was given one of zero
+    /// length: a zero (or non-positive) `Period<P>`, or a cashflow series
+    /// spanning no periods. There is nothing to amortise, discount, or annualise
+    /// over, so the answer is not merely large but absent — the annuity factor is
+    /// `0`, the `n`-th root has no `n`.
+    ///
+    /// Returned by [`annuity::payment`], [`annuity::due::payment`],
+    /// [`single_sum::rate`], [`Schedule::for_term`](amortization::Schedule::for_term),
+    /// and [`Cashflows::modified_internal_rate_of_return`] on a single cashflow
+    /// (ADR-0052). Distinct from [`NegativePeriods`](Self::NegativePeriods), which
+    /// rejects a *negative* count.
+    ZeroPeriods,
+    /// A level payment does not exceed the interest accruing on the balance it is
+    /// meant to retire, so the balance never falls and no finite term exists. This
+    /// is `PMT ≤ PV·r` (or a zero payment against a positive balance).
+    ///
+    /// Returned by [`Schedule::with_payment`](amortization::Schedule::with_payment)
+    /// and [`annuity::periods`] (ADR-0052).
+    PaymentDoesNotAmortize,
+    /// A solve has no real answer for the given inputs: the logarithm it needs has
+    /// a non-positive argument, or the relationship is degenerate (a zero rate,
+    /// which never grows one amount into a different one; a zero payment, which
+    /// never accumulates to a target).
+    ///
+    /// Returned by [`single_sum::periods`] and [`annuity::periods_from_future`]
+    /// (ADR-0052). Distinct from
+    /// [`SolveDidNotConverge`](Self::SolveDidNotConverge), where an answer may
+    /// exist but the iteration did not find it: here the closed form proves there
+    /// is none.
+    NoRealSolution,
     /// A period count was negative or not finite.
     NegativePeriods,
     /// A duration in years, given as a plain `f64`, was not finite (`NaN` or an
@@ -231,6 +289,14 @@ pub enum TvmError {
     /// An operation that requires at least one cashflow was given an empty
     /// series (e.g. [`Cashflows::internal_rate_of_return`]).
     EmptyCashflows,
+    /// A series operation that needs at least one **outflow** (a negative cashflow
+    /// — the investment whose return is being measured) was given a series with
+    /// none, so there is no present value to grow from.
+    ///
+    /// Returned by [`Cashflows::modified_internal_rate_of_return`] (ADR-0052).
+    /// Distinct from [`EmptyCashflows`](Self::EmptyCashflows), where there are no
+    /// cashflows at all.
+    NoOutflows,
     /// [`Cashflows::internal_rate_of_return`] did not converge to a root within
     /// its iteration budget, or the iteration left the valid rate domain.
     IrrDidNotConverge,
@@ -259,17 +325,24 @@ impl fmt::Display for TvmError {
                 f.write_str("continuous rate (force of interest) must be finite")
             }
             Self::NonFiniteAmount => f.write_str("monetary amount must be finite"),
-            Self::CurrencyMismatch => {
-                f.write_str("amounts are in distinct currencies and cannot be combined")
+            Self::NonFiniteScalar => f.write_str("scalar operand must be finite"),
+            Self::CurrencyMismatch { left, right } => {
+                write!(f, "cannot combine {left} with {right}")
             }
             Self::InvalidExchangeRate => {
                 f.write_str("exchange rate must be finite and greater than zero")
             }
             Self::Overflow => f.write_str("operation overflowed the finite range"),
-            Self::Undefined => f.write_str("operation is undefined for these inputs"),
+            Self::DivisionByZero => f.write_str("amount cannot be divided by zero"),
+            Self::ZeroPeriods => f.write_str("operation requires at least one period"),
+            Self::PaymentDoesNotAmortize => f.write_str(
+                "payment does not exceed the interest accruing, so the balance is never amortised",
+            ),
+            Self::NoRealSolution => f.write_str("no real solution exists for these inputs"),
             Self::NegativePeriods => f.write_str("period count must be finite and non-negative"),
             Self::NonFiniteOffset => f.write_str("dated cashflow year-offset must be finite"),
             Self::EmptyCashflows => f.write_str("cashflow series is empty"),
+            Self::NoOutflows => f.write_str("cashflow series has no outflows"),
             Self::IrrDidNotConverge => f.write_str("internal rate of return did not converge"),
             Self::SolveDidNotConverge => f.write_str("solve for rate did not converge"),
             Self::DivergentPerpetuity => {

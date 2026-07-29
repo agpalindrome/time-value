@@ -106,9 +106,11 @@ impl<'a, P: Periodicity> Cashflows<'a, P> {
     ///
     /// # Errors
     ///
-    /// [`TvmError::Overflow`] if the sum overflows to a non-finite value,
-    /// which needs cashflows near `f64::MAX` or a rate a hair above `−100%`
-    /// (ADR-0021).
+    /// - [`TvmError::CurrencyMismatch`] if the flows mix distinct non-`Xxx`
+    ///   currencies, so the result has no single denomination (ADR-0034).
+    /// - [`TvmError::Overflow`] if the sum overflows to a non-finite value,
+    ///   which needs cashflows near `f64::MAX` or a rate a hair above `−100%`
+    ///   (ADR-0021).
     pub fn net_present_value(self, rate: Rate<P>) -> Result<Money, TvmError> {
         let currency = self.currency()?;
         let discount = 1.0 / (1.0 + rate.value());
@@ -127,8 +129,10 @@ impl<'a, P: Periodicity> Cashflows<'a, P> {
     ///
     /// # Errors
     ///
-    /// [`TvmError::Overflow`] if the compounded sum overflows to a
-    /// non-finite value (ADR-0021).
+    /// - [`TvmError::CurrencyMismatch`] if the flows mix distinct non-`Xxx`
+    ///   currencies, so the result has no single denomination (ADR-0034).
+    /// - [`TvmError::Overflow`] if the compounded sum overflows to a
+    ///   non-finite value (ADR-0021).
     pub fn net_future_value(self, rate: Rate<P>) -> Result<Money, TvmError> {
         let currency = self.currency()?;
         let growth = 1.0 + rate.value();
@@ -276,9 +280,10 @@ impl<P: Periodicity> Cashflows<'_, P> {
     /// # Errors
     ///
     /// - [`TvmError::EmptyCashflows`] if the series is empty.
-    /// - [`TvmError::Undefined`] if the series has fewer than two cashflows (so
-    ///   `N = 0`: no span to annualise over), or has no outflows to discount (a
-    ///   zero present value to grow from) — both are degenerate with no answer.
+    /// - [`TvmError::ZeroPeriods`] if the series has fewer than two cashflows, so
+    ///   `N = 0` and there is no span to annualise over (ADR-0052).
+    /// - [`TvmError::NoOutflows`] if the series has no outflows to discount — no
+    ///   present value to grow from (ADR-0052).
     /// - [`TvmError::Overflow`] if the terminal value overflows on extreme
     ///   magnitudes.
     /// - [`TvmError::RateOutOfRange`] if the series has no inflows — the terminal
@@ -293,7 +298,7 @@ impl<P: Periodicity> Cashflows<'_, P> {
         }
         if self.flows.len() < 2 {
             // A single cashflow spans no periods, so there is nothing to annualise.
-            return Err(TvmError::Undefined);
+            return Err(TvmError::ZeroPeriods);
         }
 
         let finance_discount = 1.0 / (1.0 + finance_rate.value());
@@ -325,7 +330,7 @@ impl<P: Periodicity> Cashflows<'_, P> {
         if present_outflows == 0.0 {
             // No outflows: there is no present value to grow from, so the
             // annualised return is undefined rather than merely too large.
-            return Err(TvmError::Undefined);
+            return Err(TvmError::NoOutflows);
         }
 
         // Compound the inflows forward to period n, then take the n-th root of the
@@ -560,6 +565,26 @@ mod tests {
         assert!(approx(irr.value(), 0.130_662_386));
     }
 
+    /// The `# Errors` sections of `net_present_value` / `net_future_value` name
+    /// `CurrencyMismatch`; pin it (ADR-0045 rule 2, ADR-0052).
+    #[test]
+    fn npv_and_nfv_reject_a_series_of_mixed_currencies() {
+        use crate::Currency;
+        let flows = [
+            Money::new(-100.0, Currency::Usd).unwrap(),
+            Money::new(60.0, Currency::Eur).unwrap(),
+        ];
+        let series = Cashflows::<Monthly>::new(&flows);
+        let rate = Rate::<Monthly>::new(0.01).unwrap();
+        // `left` is the currency accumulated so far, `right` the offending flow's.
+        let expected = TvmError::CurrencyMismatch {
+            left: Currency::Usd,
+            right: Currency::Eur,
+        };
+        assert_eq!(series.net_present_value(rate), Err(expected.clone()));
+        assert_eq!(series.net_future_value(rate), Err(expected));
+    }
+
     #[test]
     fn irr_on_empty_series_errors() {
         let flows: [Money; 0] = [];
@@ -702,11 +727,12 @@ mod tests {
 
         #[test]
         fn single_cashflow_has_no_span() {
+            // N = 0: the two degenerate MIRR cases are now told apart (ADR-0052).
             let flows = [Money::agnostic(-1000.0).unwrap()];
             assert_eq!(
                 Cashflows::<Monthly>::new(&flows)
                     .modified_internal_rate_of_return(rate(0.10), rate(0.10)),
-                Err(TvmError::Undefined)
+                Err(TvmError::ZeroPeriods)
             );
         }
 
@@ -716,7 +742,7 @@ mod tests {
             assert_eq!(
                 Cashflows::<Monthly>::new(&flows)
                     .modified_internal_rate_of_return(rate(0.10), rate(0.10)),
-                Err(TvmError::Undefined)
+                Err(TvmError::NoOutflows)
             );
         }
 

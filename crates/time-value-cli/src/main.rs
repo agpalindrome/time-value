@@ -23,7 +23,7 @@
 
 mod results;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use time_value::{
     amortization, annuity, continuous, single_sum, Annual, Cashflows, ContinuousRate, Currency,
@@ -688,7 +688,7 @@ fn run_series(command: SeriesCommand, currency: Currency) -> Result<ScalarOutput
             let series = Cashflows::<Per>::new(&flows);
             let mirr = series
                 .modified_internal_rate_of_return(rate(finance)?, rate(reinvest)?)
-                .context("modified internal rate of return is undefined")?;
+                .map_err(|e| anyhow!("modified internal rate of return: {e}"))?;
             plain_out(mirr.value())
         }
         SeriesCommand::Xnpv { rate: r, flows } => {
@@ -739,7 +739,7 @@ fn run_single_sum(command: SingleSumCommand, currency: Currency) -> Result<Scala
                 PresentValue(money(present, currency)?),
                 FutureValue(money(future, currency)?),
             )
-            .context("number of periods is undefined for these inputs")?;
+            .map_err(|e| anyhow!("number of periods: {e}"))?;
             plain_out(n.value())
         }
         SingleSumCommand::Rate {
@@ -788,7 +788,7 @@ fn run_annuity(command: AnnuityCommand, currency: Currency) -> Result<ScalarOutp
             present,
         } => {
             let pmt = annuity::payment(rate(r)?, period(n)?, money(present, currency)?)
-                .context("annuity payment is undefined (e.g. zero periods)")?;
+                .map_err(|e| anyhow!("annuity payment: {e}"))?;
             money_out(pmt)
         }
         AnnuityCommand::Nper {
@@ -809,7 +809,7 @@ fn run_annuity(command: AnnuityCommand, currency: Currency) -> Result<ScalarOutp
                     FutureValue(money(f, currency)?),
                 ),
             }
-            .context("number of periods is undefined for these inputs")?;
+            .map_err(|e| anyhow!("number of periods: {e}"))?;
             plain_out(n.value())
         }
         AnnuityCommand::Rate {
@@ -936,7 +936,7 @@ fn run_annuity_due(command: AnnuityDueCommand, currency: Currency) -> Result<Sca
             present,
         } => {
             let pmt = annuity::due::payment(rate(r)?, period(n)?, money(present, currency)?)
-                .context("annuity-due payment is undefined (e.g. zero periods)")?;
+                .map_err(|e| anyhow!("annuity-due payment: {e}"))?;
             money_out(pmt)
         }
     })
@@ -1084,7 +1084,7 @@ fn run_amortize(
         (None, None) => bail!("provide either --periods or --payment"),
         (Some(_), Some(_)) => bail!("--periods and --payment are mutually exclusive"),
     }
-    .context("amortization schedule is undefined for these inputs")?;
+    .map_err(|e| anyhow!("amortization schedule: {e}"))?;
 
     // One typed shape backs both renderings (ADR-0039), so the JSON object and the
     // TSV table cannot drift.
@@ -1124,7 +1124,11 @@ fn main() {
         // Print only the outermost message, not anyhow's full `{:#}` chain: our
         // context strings already restate the library error in user terms, so the
         // chain just doubled the text (ADR-0028 / #30). An uncontexted `TvmError`
-        // still surfaces its own Display here.
+        // still surfaces its own Display here. Where the library error is now more
+        // specific than any static context could be — the degenerate cases split
+        // out of `Undefined` (ADR-0052) — the site builds one message that names
+        // the operation *and* interpolates the error, so nothing is lost and
+        // nothing is doubled.
         eprintln!("error: {error}");
         std::process::exit(1);
     }
