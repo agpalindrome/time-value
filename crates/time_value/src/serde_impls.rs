@@ -124,7 +124,7 @@ impl<'de> Deserialize<'de> for Money {
 impl Serialize for FxRate {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         FxRateWire {
-            from: self.from(),
+            from: self.source(),
             to: self.to(),
             rate: self.rate(),
         }

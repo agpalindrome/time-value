@@ -52,7 +52,7 @@ the old one **Superseded** (link both ways) — don't rewrite the old one.
 | [0031](0031-split-non-finite-result-into-overflow-and-undefined.md) | Split `NonFiniteResult` into `Overflow` and `Undefined` | Accepted |
 | [0032](0032-ergonomic-convenience-impls.md) | Ergonomic convenience impls (`ZERO` / `Default` / `TryFrom` / `From`) | Accepted |
 | [0033](0033-core-domain-model-two-axes-and-an-f64-engine.md) | Core domain model — two axes, and an `f64` computation engine | Accepted |
-| [0034](0034-money-and-currency.md) | Money and currency — `f64` magnitude, a runtime ISO-4217 enum, and FX | Accepted |
+| [0034](0034-money-and-currency.md) | Money and currency — `f64` magnitude, a runtime ISO-4217 enum, and FX | Accepted (amended by 0053) |
 | [0035](0035-periodicity-tagged-time.md) | Periodicity-tagged time (`Period<P>`) | Accepted |
 | [0036](0036-continuous-compounding-force-of-interest.md) | Continuous compounding — a periodicity-free force of interest | Accepted |
 | [0037](0037-currency-in-the-binaries.md) | Currency in the binaries — an opt-in code that is echoed, not rounded | Accepted |
@@ -71,3 +71,4 @@ the old one **Superseded** (link both ways) — don't rewrite the old one.
 | [0050](0050-role-newtypes-for-ambiguous-arguments.md) | Role newtypes for transposable arguments | Accepted (extends 0005) |
 | [0051](0051-installment-private-fields.md) | `Installment`'s fields are private, read through accessors | Accepted (amends 0027) |
 | [0052](0052-tvmerror-variant-granularity.md) | `TvmError` variant granularity — a payload on `CurrencyMismatch`, `Undefined` split | Accepted (amends 0004, 0031) |
+| [0053](0053-fxrate-domain-and-currency-ordering.md) | `FxRate`'s domain is closed under reciprocal, `from` → `source`, and `Currency`'s ordering policy | Accepted (amends 0034) |

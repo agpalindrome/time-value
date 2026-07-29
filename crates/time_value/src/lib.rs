@@ -211,7 +211,7 @@ pub enum TvmError {
     /// (`docs/adr/0034-money-and-currency.md`).
     ///
     /// For [`Money::convert`], `left` is the amount's own currency and `right` is
-    /// the [`FxRate`]'s [`from`](FxRate::from) currency, which it must match.
+    /// the [`FxRate`]'s [`source`](FxRate::source) currency, which it must match.
     ///
     /// ```
     /// use time_value::{Currency, Money, TvmError};
@@ -230,9 +230,13 @@ pub enum TvmError {
         /// The currency of the right-hand operand.
         right: Currency,
     },
-    /// An exchange rate supplied to [`FxRate::new`](crate::FxRate::new) was not
-    /// finite or was not strictly positive; a non-positive price has no economic
-    /// meaning (ADR-0034).
+    /// An exchange rate supplied to [`FxRate::new`](crate::FxRate::new) fell
+    /// outside the accepted domain: it was not finite, was not strictly positive (a
+    /// non-positive price has no economic meaning — ADR-0034), or lay in the
+    /// subnormal band `rate < 2.3e-308` / `rate > 4.5e307` where the reciprocal
+    /// would overflow, which [`FxRate::inverse`](crate::FxRate::inverse) must be
+    /// able to take infallibly (ADR-0053). No real exchange rate is anywhere near
+    /// that band.
     InvalidExchangeRate,
     /// An operation's `f64` arithmetic overflowed the finite range — a genuine
     /// result exists mathematically but is too large to represent, so it became an
@@ -329,9 +333,9 @@ impl fmt::Display for TvmError {
             Self::CurrencyMismatch { left, right } => {
                 write!(f, "cannot combine {left} with {right}")
             }
-            Self::InvalidExchangeRate => {
-                f.write_str("exchange rate must be finite and greater than zero")
-            }
+            Self::InvalidExchangeRate => f.write_str(
+                "exchange rate must be greater than zero and invertible (2.3e-308 to 4.5e307)",
+            ),
             Self::Overflow => f.write_str("operation overflowed the finite range"),
             Self::DivisionByZero => f.write_str("amount cannot be divided by zero"),
             Self::ZeroPeriods => f.write_str("operation requires at least one period"),

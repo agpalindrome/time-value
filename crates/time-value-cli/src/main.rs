@@ -1052,10 +1052,14 @@ fn run_continuous(command: ContinuousCommand, currency: Currency) -> Result<Scal
 /// Convert an amount from one currency into another at a caller-supplied FX rate
 /// (ADR-0034/0037). The result is a monetary value tagged the `to` currency, so it
 /// echoes that code like any other monetary result. `FxRate::new` rejects a
-/// non-positive or non-finite rate; the multiply can overflow on an extreme input.
+/// non-positive or non-finite rate, and the extreme band whose reciprocal would
+/// overflow (ADR-0053); the multiply can overflow on an extreme input.
+///
+/// The rate error interpolates the library's message rather than restating it
+/// statically, per ADR-0052 — the library names the accepted band, which no static
+/// string here could keep in step with.
 fn run_convert(from: Currency, to: Currency, rate: f64, amount: f64) -> Result<ScalarOutput> {
-    let fx = FxRate::new(from, to, rate)
-        .context("invalid exchange rate (must be finite and greater than 0)")?;
+    let fx = FxRate::new(from, to, rate).map_err(|e| anyhow!("invalid exchange rate: {e}"))?;
     let converted = money(amount, from)?
         .convert(fx)
         .context("converted amount is out of range")?;
