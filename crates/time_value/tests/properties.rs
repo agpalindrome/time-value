@@ -5,23 +5,43 @@
 //! each other, net present value is monotone in the discount rate and collapses
 //! to the plain sum at a zero rate, the internal rate of return zeroes the net
 //! present value, the annuity payment inverts the annuity present value (for both
-//! ordinary and annuity-due), and `Money`'s arithmetic obeys the usual algebraic
-//! laws.
+//! ordinary and annuity-due), an amortization schedule conserves the principal it
+//! repays, and `Money`'s arithmetic obeys the usual algebraic laws.
 //!
 //! `proptest` is a dev-dependency only, so it never reaches the published
 //! crate's dependency tree (the zero-dependency promise is about distribution,
 //! not test tooling — `docs/adr/0009-no_std-and-optional-libm.md`). The `std`/
-//! `libm`-gated operations (single sum, annuity) are tested only when a
-//! transcendental-math feature is on.
+//! `libm`-gated operations (single sum, annuity, `Schedule::for_term`) are tested
+//! only when a transcendental-math feature is on.
 
 use proptest::prelude::*;
-use time_value::{Cashflows, Money, Monthly, Rate};
+use time_value::{amortization::Schedule, Cashflows, Money, Monthly, Rate};
 
 /// Absolute closeness check, mirroring the crate's own `no_std`-safe tolerance
 /// helper (`f64::abs` is not in `core`).
 fn close(a: f64, b: f64, tolerance: f64) -> bool {
     let d = a - b;
     d < tolerance && d > -tolerance
+}
+
+/// A schedule that is guaranteed to amortise: the level payment is the first
+/// period's interest (`principal × rate`) plus a strictly positive `slice` of the
+/// principal, so it always clears that period's interest and the balance must
+/// fall. This keeps the generators inside [`Schedule::with_payment`]'s defined
+/// domain — a payment at or below the first period's interest is
+/// [`TvmError::Undefined`](time_value::TvmError::Undefined), not a schedule.
+///
+/// The slice is bounded below (5% of the principal per period), which also bounds
+/// the schedule's length: the term runs to about `−ln(slice / (rate + slice)) /
+/// ln(1 + rate)` periods, a couple of dozen at the extremes of the ranges used
+/// here, so every case terminates quickly.
+fn amortizing_schedule(rate: f64, principal: f64, slice: f64) -> Schedule<Monthly> {
+    Schedule::with_payment(
+        Rate::<Monthly>::new(rate).unwrap(),
+        Money::agnostic(principal * (rate + slice)).unwrap(),
+        Money::agnostic(principal).unwrap(),
+    )
+    .unwrap()
 }
 
 proptest! {
@@ -120,6 +140,107 @@ proptest! {
         let money = Money::agnostic(amount).unwrap();
         let recovered = money.try_mul(factor).unwrap().try_div(factor).unwrap();
         prop_assert!(close(recovered.value(), amount, 1e-6 + 1e-12 * amount.abs()));
+    }
+
+    /// Every installment accounts for its whole payment: the interest on the
+    /// opening balance plus the principal repaid *is* the amount paid (ADR-0027).
+    /// This generalises the `interest_plus_principal_equals_each_payment` point
+    /// test, and it holds for the smaller final installment too — there the
+    /// payment is whatever closes the loan.
+    ///
+    /// The split is a rearrangement (`principal = payment − interest`), so the sum
+    /// recovers the payment only up to rounding; the tolerance is relative to the
+    /// principal, which bounds every quantity in the schedule.
+    #[test]
+    fn every_installment_splits_its_payment_into_interest_and_principal(
+        rate in 0.0f64..0.2,
+        principal in 100.0f64..1e6,
+        slice in 0.05f64..1.0,
+    ) {
+        for installment in amortizing_schedule(rate, principal, slice) {
+            prop_assert!(close(
+                installment.interest.value() + installment.principal.value(),
+                installment.payment.value(),
+                1e-9 * principal,
+            ));
+        }
+    }
+
+    /// Interest accrues on the balance *outstanding at the start of the period* —
+    /// the previous installment's closing balance, or the original principal for
+    /// the first — and the principal repaid is exactly what the balance falls by.
+    ///
+    /// Both are asserted exactly rather than approximately: the schedule evaluates
+    /// these very expressions (`balance × rate`, then `balance − principal`), so
+    /// recomputing them here reproduces the same `f64` bit-for-bit. The closing
+    /// installment satisfies the second law too, by repaying the whole remaining
+    /// balance and landing on zero.
+    ///
+    /// The comparison is between `Money` values rather than bare `f64`s — the
+    /// crate denies `clippy::float_cmp`, and equality on the public type is the
+    /// idiom the rest of this file uses where a law really is exact.
+    #[test]
+    fn interest_accrues_on_the_opening_balance(
+        rate in 0.0f64..0.2,
+        principal in 100.0f64..1e6,
+        slice in 0.05f64..1.0,
+    ) {
+        let mut opening = Money::agnostic(principal).unwrap();
+        for installment in amortizing_schedule(rate, principal, slice) {
+            prop_assert_eq!(
+                installment.interest,
+                Money::agnostic(opening.value() * rate).unwrap()
+            );
+            prop_assert_eq!(
+                installment.balance,
+                opening.try_sub(installment.principal).unwrap()
+            );
+            opening = installment.balance;
+        }
+    }
+
+    /// The schedule conserves principal: the principal portions of every
+    /// installment sum back to the amount borrowed, no more and no less, and the
+    /// loan ends exactly repaid. The residual is an accumulation of at most a few
+    /// dozen roundings, so the tolerance scales with the principal.
+    ///
+    /// The final balance is exactly zero, not merely close to it: the branch that
+    /// closes the loan assigns `0.0` rather than subtracting down to it.
+    #[test]
+    fn the_principal_portions_repay_exactly_the_principal(
+        rate in 0.0f64..0.2,
+        principal in 100.0f64..1e6,
+        slice in 0.05f64..1.0,
+    ) {
+        let mut repaid = 0.0;
+        let mut final_balance = None;
+        for installment in amortizing_schedule(rate, principal, slice) {
+            repaid += installment.principal.value();
+            final_balance = Some(installment.balance);
+        }
+        // `Some` also witnesses that a positive principal owes at least one
+        // installment; an exhausted schedule would leave this `None`.
+        prop_assert_eq!(final_balance, Some(Money::ZERO));
+        prop_assert!(close(repaid, principal, 1e-9 * principal));
+    }
+
+    /// A schedule that amortises never stalls or rebounds: each installment leaves
+    /// strictly less outstanding than the one before, so the balance descends
+    /// monotonically from the principal to zero and the iterator terminates. This
+    /// is the positive statement behind [`Schedule::with_payment`]'s rejection of a
+    /// payment that cannot amortise (ADR-0027, ADR-0031).
+    #[test]
+    fn the_balance_falls_monotonically_to_zero(
+        rate in 0.0f64..0.2,
+        principal in 100.0f64..1e6,
+        slice in 0.05f64..1.0,
+    ) {
+        let mut previous = Money::agnostic(principal).unwrap();
+        for installment in amortizing_schedule(rate, principal, slice) {
+            prop_assert!(installment.balance.value() < previous.value());
+            previous = installment.balance;
+        }
+        prop_assert_eq!(previous, Money::ZERO);
     }
 }
 
@@ -373,5 +494,49 @@ proptest! {
         let future = continuous::future_value(rate, years, present).unwrap();
         let back = continuous::present_value(rate, years, future).unwrap();
         prop_assert!(close(back.value(), present.value(), 1e-6 * present.value()));
+    }
+
+    /// A term-sized schedule runs for exactly the term requested: the payment
+    /// [`annuity::payment`](time_value::annuity::payment) computes retires the
+    /// principal on period `n`, neither leaving a stub on `n + 1` nor finishing
+    /// early (ADR-0027). This generalises the `runs_exactly_the_term_and_clears_
+    /// the_balance` point test to the whole class of terms.
+    ///
+    /// Landing on `n` at all depends on `FINAL_INSTALLMENT_SLACK` absorbing the
+    /// floating-point residual of a *computed* level payment — this property is
+    /// what pins that constant to its job. The band is bounded to well-conditioned
+    /// monthly loans (0.1%–5% per period, up to ten years): the level payment is
+    /// formed from `1 − (1+r)⁻ⁿ`, so far outside it the payment itself loses
+    /// precision to cancellation and the closing period is no longer determined by
+    /// the schedule's arithmetic. Whole periods are used because a fractional term
+    /// has no "final period" to land on.
+    #[test]
+    fn for_term_lands_the_final_installment_on_the_requested_period(
+        rate in 0.001f64..0.05,
+        periods in 1u32..=120,
+        principal in 100.0f64..1e7,
+    ) {
+        use time_value::Period;
+
+        let schedule = Schedule::for_term(
+            Rate::<Monthly>::new(rate).unwrap(),
+            Period::new(f64::from(periods)).unwrap(),
+            Money::agnostic(principal).unwrap(),
+        )
+        .unwrap();
+
+        let mut count = 0u32;
+        let mut repaid = 0.0;
+        let mut final_balance = None;
+        for installment in schedule {
+            count += 1;
+            repaid += installment.principal.value();
+            final_balance = Some(installment.balance);
+        }
+        prop_assert_eq!(count, periods);
+        prop_assert_eq!(final_balance, Some(Money::ZERO));
+        // Up to 120 roundings, and the computed payment carries its own residual,
+        // so this is looser than the exact-payment schedule's conservation law.
+        prop_assert!(close(repaid, principal, 1e-6 * principal));
     }
 }
