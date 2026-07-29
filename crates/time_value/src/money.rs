@@ -244,13 +244,13 @@ impl Money {
     /// Converts this amount into another currency using a caller-supplied
     /// [`FxRate`] (ADR-0034).
     ///
-    /// The rate's [`from`](FxRate::from) must match this amount's currency;
+    /// The rate's [`source`](FxRate::source) must match this amount's currency;
     /// the result is tagged the rate's [`to`](FxRate::to) currency. To convert the
     /// other way, apply [`FxRate::inverse`].
     ///
     /// # Errors
     ///
-    /// Returns [`TvmError::CurrencyMismatch`] if `self.currency() != fx.from()`, or
+    /// Returns [`TvmError::CurrencyMismatch`] if `self.currency() != fx.source()`, or
     /// [`TvmError::Overflow`] if the converted magnitude leaves the finite range.
     ///
     /// ```
@@ -296,13 +296,15 @@ pub(crate) fn combine(a: Currency, b: Currency) -> Result<Currency, TvmError> {
     }
 }
 
-/// A directional exchange rate: the price of one unit of [`from`](Self::from) in
-/// units of [`to`](Self::to) (ADR-0034).
+/// A directional exchange rate: the price of one unit of [`source`](Self::source)
+/// in units of [`to`](Self::to) (ADR-0034).
 ///
 /// Rates are **caller-supplied** — the core carries no rate data and stays
 /// `no_std`. Triangulation (via a base currency) and bid/ask spreads are out of
 /// scope: those are rate-*sourcing* concerns, not core arithmetic. A rate can be
-/// used in either direction via [`inverse`](Self::inverse).
+/// used in either direction via [`inverse`](Self::inverse), which is infallible
+/// because [`new`](Self::new) admits only rates whose reciprocal is itself a valid
+/// rate (ADR-0053).
 ///
 /// ```
 /// use time_value::{Currency, FxRate};
@@ -311,7 +313,7 @@ pub(crate) fn combine(a: Currency, b: Currency) -> Result<Currency, TvmError> {
 /// assert_eq!(gbp_to_usd.rate(), 1.25);
 ///
 /// let usd_to_gbp = gbp_to_usd.inverse();
-/// assert_eq!(usd_to_gbp.from(), Currency::Usd);
+/// assert_eq!(usd_to_gbp.source(), Currency::Usd);
 /// assert_eq!(usd_to_gbp.to(), Currency::Gbp);
 /// assert_eq!(usd_to_gbp.rate(), 1.0 / 1.25);
 /// # Ok::<(), time_value::TvmError>(())
@@ -326,13 +328,26 @@ pub struct FxRate {
 impl FxRate {
     /// Constructs the rate that prices one unit of `from` at `rate` units of `to`.
     ///
+    /// The accepted domain is **closed under reciprocal**, so that
+    /// [`inverse`](Self::inverse) can be infallible: `rate` must be a *normal*
+    /// `f64` whose reciprocal is also normal. That excludes zero, the negatives,
+    /// `NaN`, the infinities, and — the reason both halves of the test are needed —
+    /// the subnormal fringes at either end of the range. `f64::MAX` is itself
+    /// normal, but `1.0 / f64::MAX ≈ 5.6e-309` is *subnormal*, and inverting that
+    /// again overflows to infinity, so `is_normal()` alone would not close the
+    /// domain (ADR-0053).
+    ///
+    /// The excluded band is `rate < 2.3e-308` or `rate > 4.5e307`. No real exchange
+    /// rate is within hundreds of orders of magnitude of it: the extremes of actual
+    /// currency markets sit around `1e-7` to `1e7`.
+    ///
     /// # Errors
     ///
-    /// Returns [`TvmError::InvalidExchangeRate`] if `rate` is not finite or is not
+    /// Returns [`TvmError::InvalidExchangeRate`] if `rate` is not finite, is not
     /// strictly positive (a non-positive exchange rate is economically
-    /// meaningless).
+    /// meaningless), or lies in the subnormal band described above.
     pub fn new(from: Currency, to: Currency, rate: f64) -> Result<Self, TvmError> {
-        if rate.is_finite() && rate > 0.0 {
+        if rate.is_normal() && rate > 0.0 && (1.0 / rate).is_normal() {
             Ok(Self { from, to, rate })
         } else {
             Err(TvmError::InvalidExchangeRate)
@@ -340,8 +355,13 @@ impl FxRate {
     }
 
     /// The source currency (the unit being priced).
+    ///
+    /// Named `source` rather than `from` so that the name does not shadow
+    /// [`From::from`] on this type: an *inherent* `FxRate::from` would win path-form
+    /// resolution over any future `impl From<T> for FxRate` and make that
+    /// constructor form permanently unreachable (ADR-0053).
     #[must_use]
-    pub const fn from(self) -> Currency {
+    pub const fn source(self) -> Currency {
         self.from
     }
 
@@ -351,17 +371,19 @@ impl FxRate {
         self.to
     }
 
-    /// The exchange rate — units of [`to`](Self::to) per unit of [`from`](Self::from).
+    /// The exchange rate — units of [`to`](Self::to) per unit of
+    /// [`source`](Self::source).
     #[must_use]
     pub const fn rate(self) -> f64 {
         self.rate
     }
 
-    /// The reverse rate: swaps `from`/`to` and reciprocates the rate, so it
-    /// converts [`to`](Self::to) back into [`from`](Self::from).
+    /// The reverse rate: swaps the two currencies and reciprocates the rate, so it
+    /// converts [`to`](Self::to) back into [`source`](Self::source).
     ///
-    /// Infallible: the rate is finite and strictly positive by construction, so its
-    /// reciprocal is finite and strictly positive too.
+    /// Infallible: [`new`](Self::new) accepts only a normal rate whose reciprocal is
+    /// also normal, so the reciprocal taken here is always a rate `new` would itself
+    /// accept — and inverting twice returns to the accepted domain (ADR-0053).
     #[must_use]
     pub fn inverse(self) -> Self {
         Self {
@@ -735,5 +757,91 @@ mod tests {
             FxRate::new(Currency::Usd, Currency::Eur, f64::INFINITY),
             Err(TvmError::InvalidExchangeRate)
         );
+    }
+
+    /// The two ends of the band `new` excludes so that `inverse` cannot lie
+    /// (ADR-0053). Each of these passed the old `is_finite() && > 0.0` test.
+    #[test]
+    fn fx_rate_rejects_rates_whose_reciprocal_escapes_the_domain() {
+        use crate::FxRate;
+        let rejected = |rate| FxRate::new(Currency::Usd, Currency::Eur, rate);
+
+        // Subnormal: `1.0 / 5e-324` is `+∞`, and inverting twice gives `0.0` — a
+        // value `new` itself rejects.
+        assert_eq!(rejected(5e-324), Err(TvmError::InvalidExchangeRate));
+        assert_eq!(
+            rejected(f64::MIN_POSITIVE / 2.0),
+            Err(TvmError::InvalidExchangeRate)
+        );
+        // Normal, but its reciprocal is subnormal: `1.0 / f64::MAX ≈ 5.6e-309`.
+        // This is why `is_normal()` alone does not close the domain.
+        assert!(f64::MAX.is_normal());
+        assert!((1.0 / f64::MAX).is_subnormal());
+        assert_eq!(rejected(f64::MAX), Err(TvmError::InvalidExchangeRate));
+
+        // The exact boundaries are admitted: `f64::MIN_POSITIVE` is the smallest
+        // normal, and its reciprocal is the largest rate whose own reciprocal is
+        // still normal.
+        assert!(rejected(f64::MIN_POSITIVE).is_ok());
+        assert!(rejected(1.0 / f64::MIN_POSITIVE).is_ok());
+    }
+
+    /// The accepted domain is closed under reciprocal, so `inverse()` is honest at
+    /// its extremes and not merely in the middle (ADR-0053).
+    #[test]
+    fn fx_rate_inverse_stays_in_the_accepted_domain() {
+        use crate::FxRate;
+        for rate in [
+            f64::MIN_POSITIVE,
+            1.0 / f64::MIN_POSITIVE,
+            1e-300,
+            1e300,
+            1e-7,
+            1e7,
+            0.9,
+            1.0,
+            1.25,
+        ] {
+            let fx = FxRate::new(Currency::Usd, Currency::Eur, rate).unwrap();
+            let inverted = fx.inverse();
+            assert!(
+                inverted.rate().is_normal() && inverted.rate() > 0.0,
+                "inverse of {rate:e} left the domain: {}",
+                inverted.rate()
+            );
+            // The inverse is a rate `new` would itself accept — the property the
+            // constructor's domain exists to guarantee.
+            assert!(FxRate::new(Currency::Eur, Currency::Usd, inverted.rate()).is_ok());
+        }
+    }
+
+    /// A double inverse recovers the original rate and direction. The magnitude is
+    /// only recovered to within a rounding error — `1.0 / (1.0 / x)` is not exact
+    /// for every `x` — so the currencies are compared exactly and the rate
+    /// relatively (ADR-0033's approximate-real precision contract).
+    #[test]
+    fn fx_rate_double_inverse_recovers_the_original() {
+        use crate::FxRate;
+        for rate in [f64::MIN_POSITIVE, 1.0 / f64::MIN_POSITIVE, 1e-7, 0.9, 1.25] {
+            let fx = FxRate::new(Currency::Gbp, Currency::Jpy, rate).unwrap();
+            let round_tripped = fx.inverse().inverse();
+            assert_eq!(round_tripped.source(), Currency::Gbp);
+            assert_eq!(round_tripped.to(), Currency::Jpy);
+            let relative_error = (round_tripped.rate() - rate).abs() / rate;
+            assert!(
+                relative_error < 1e-15,
+                "double inverse of {rate:e} gave {:e}",
+                round_tripped.rate()
+            );
+        }
+    }
+
+    #[test]
+    fn fx_rate_accessors_report_the_pair() {
+        use crate::FxRate;
+        let fx = FxRate::new(Currency::Gbp, Currency::Usd, 1.25).unwrap();
+        assert_eq!(fx.source(), Currency::Gbp);
+        assert_eq!(fx.to(), Currency::Usd);
+        assert_eq!(fx.rate(), 1.25);
     }
 }

@@ -429,6 +429,24 @@ fn convert_rejects_a_non_positive_rate() {
         .stdout(predicate::str::contains("exchange rate"));
 }
 
+/// The narrowed `FxRate` domain (ADR-0053) reaches the MCP surface too: a
+/// subnormal rate is an exchange-rate error rather than a subnormal result.
+#[test]
+fn convert_rejects_a_rate_outside_the_invertible_band() {
+    let calls = concat!(
+        r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"convert","arguments":{"amount":100,"from":"USD","to":"EUR","rate":5e-324}}}"#,
+        "\n",
+    );
+
+    Command::cargo_bin("time-value-mcp")
+        .unwrap()
+        .write_stdin(session(calls))
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"error\""))
+        .stdout(predicate::str::contains("exchange rate"));
+}
+
 #[test]
 fn convert_rejects_an_unknown_currency_code() {
     let calls = concat!(

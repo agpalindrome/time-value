@@ -878,6 +878,31 @@ fn convert_rejects_a_non_positive_rate() {
         .stderr(predicate::str::contains("exchange rate"));
 }
 
+/// A rate that is finite and positive but whose reciprocal is not — the band
+/// `FxRate::new` narrowed to so that `inverse()` cannot lie (ADR-0053). It reaches
+/// the CLI as an exchange-rate error, not as an out-of-range converted amount.
+#[test]
+fn convert_rejects_a_rate_outside_the_invertible_band() {
+    for rate in ["5e-324", "1.7976931348623157e308"] {
+        time_value()
+            .args([
+                "convert", "--from", "USD", "--to", "EUR", "--rate", rate, "100",
+            ])
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("exchange rate"));
+    }
+
+    // A realistically extreme rate is still fine — the excluded band is hundreds
+    // of orders of magnitude beyond any real currency pair.
+    time_value()
+        .args([
+            "convert", "--from", "USD", "--to", "EUR", "--rate", "1e-7", "100",
+        ])
+        .assert()
+        .success();
+}
+
 #[test]
 fn convert_rejects_an_unknown_currency_code() {
     time_value()

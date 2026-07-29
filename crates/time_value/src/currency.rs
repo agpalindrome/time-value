@@ -7,9 +7,11 @@
 //! ISO 4217 active set — fiat, the precious-metal codes, the fund and unit-of-
 //! account codes, and the reserved [`Xxx`](Currency::Xxx)/[`Xts`](Currency::Xts).
 //! The variants and their metadata tables were generated from the ISO 4217
-//! published list (alphabetic + numeric codes and minor-unit exponents). The enum
-//! is exhaustive, so the compiler guarantees every variant carries metadata; when
-//! ISO amends the list, update the tables to match.
+//! published list (alphabetic + numeric codes and minor-unit exponents). Each
+//! metadata table is an *exhaustive `match`* over the variants, so the compiler
+//! guarantees every variant carries a code, a numeric code and a minor-unit
+//! exponent; when ISO amends the list, adding the variant makes those matches stop
+//! compiling until they cover it.
 
 use core::fmt;
 
@@ -26,12 +28,42 @@ use core::fmt;
 /// [`TvmError::CurrencyMismatch`](crate::TvmError::CurrencyMismatch). Pure-number
 /// TVM is therefore all `Xxx` and computes exactly as an untagged core would.
 ///
-/// The enum is `#[non_exhaustive]`: no user-defined currencies exist in `1.0`,
-/// but a variant (e.g. a future `Custom`) can be added without a breaking change
-/// (ADR-0034).
+/// As a *Rust type* the enum is `#[non_exhaustive]`, even though it is complete
+/// over the ISO 4217 active set: no user-defined currencies exist in `1.0`, but a
+/// variant (a newly-issued ISO code, or a future `Custom`) can be added without a
+/// breaking change (ADR-0034). Downstream `match`es therefore need a wildcard arm.
+///
+/// # Ordering
+///
+/// [`Ord`] is derived, and the variants are declared in **alphabetical order of
+/// ISO 4217 code**, so `a < b` is exactly `a.code() < b.code()`. The crate commits
+/// to keeping it that way: **a newly-issued ISO code is inserted in its
+/// alphabetical position** (in the enum and in [`ALL`](Self::ALL) alike), never
+/// appended (ADR-0053).
+///
+/// That single rule preserves both properties a caller could reasonably rely on.
+/// The order stays alphabetical, and — because an insertion into a sorted sequence
+/// does not transpose anything already in it — the relative order of any two
+/// *existing* currencies is unchanged by the addition. A `BTreeMap<Currency, _>`,
+/// a sorted report, or a persisted sort key gains the new code in its proper place
+/// without reshuffling the rest.
+///
+/// What is **not** guaranteed is the numeric discriminant (`Currency::Usd as u16`),
+/// which shifts whenever an alphabetically-earlier variant is added. It is an
+/// implementation detail; persist [`code`](Self::code) instead. Nor is the ISO
+/// [`numeric`](Self::numeric) code correlated with the ordering — ISO assigns those
+/// non-alphabetically.
+///
+/// Should a non-ISO variant ever be added (ADR-0034 leaves the door open for
+/// `Custom`), it has no ISO code to sort by and would be declared last; the
+/// guarantee then reads "alphabetical among the ISO codes, non-ISO variants after
+/// them", which still transposes no existing pair.
 ///
 /// ```
 /// use time_value::Currency;
+///
+/// assert!(Currency::Eur < Currency::Usd); // alphabetical by ISO code
+/// assert!(Currency::ALL.windows(2).all(|w| w[0].code() < w[1].code()));
 ///
 /// assert_eq!(Currency::Usd.code(), "USD");
 /// assert_eq!(Currency::Usd.numeric(), 840);
@@ -1765,6 +1797,44 @@ mod tests {
                 "{} listed twice in ALL",
                 c.code()
             );
+        }
+    }
+
+    /// The ordering policy the `Currency` rustdoc commits to (ADR-0053), pinned
+    /// exhaustively over the finite enum (ADR-0045 rule 2). It fails the moment a
+    /// new ISO code is *appended* rather than inserted alphabetically — which is
+    /// the mistake `#[non_exhaustive]` makes look harmless.
+    #[test]
+    fn ord_is_alphabetical_by_iso_code() {
+        for pair in Currency::ALL.windows(2) {
+            let (earlier, later) = (pair[0], pair[1]);
+            // `ALL` is itself declared in alphabetical order …
+            assert!(
+                earlier.code() < later.code(),
+                "`ALL` is out of alphabetical order at {} / {}",
+                earlier.code(),
+                later.code()
+            );
+            // … and the derived `Ord` agrees with it, so `a < b` is `a.code() <
+            // b.code()` for every pair, not just adjacent ones.
+            assert!(
+                earlier < later,
+                "`Ord` disagrees with the code order at {} / {}",
+                earlier.code(),
+                later.code()
+            );
+        }
+        // Non-adjacent pairs, across the whole set.
+        for (i, &a) in Currency::ALL.iter().enumerate() {
+            for &b in &Currency::ALL[i + 1..] {
+                assert_eq!(
+                    a.cmp(&b),
+                    a.code().cmp(b.code()),
+                    "{} vs {}",
+                    a.code(),
+                    b.code()
+                );
+            }
         }
     }
 
