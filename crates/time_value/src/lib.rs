@@ -184,6 +184,7 @@ macro_rules! docs_rs_links {
 [`annuity::periods`]: https://docs.rs/time_value/latest/time_value/annuity/fn.periods.html
 [`annuity::periods_from_future`]: https://docs.rs/time_value/latest/time_value/annuity/fn.periods_from_future.html
 [`annuity::rate`]: https://docs.rs/time_value/latest/time_value/annuity/fn.rate.html
+[`annuity::rate_from_future`]: https://docs.rs/time_value/latest/time_value/annuity/fn.rate_from_future.html
 [`annuity::perpetuity`]: https://docs.rs/time_value/latest/time_value/annuity/fn.perpetuity.html
 [`annuity::growing_perpetuity`]: https://docs.rs/time_value/latest/time_value/annuity/fn.growing_perpetuity.html
 [amortization::Schedule::for_term]: https://docs.rs/time_value/latest/time_value/amortization/struct.Schedule.html#method.for_term
@@ -392,6 +393,22 @@ pub enum TvmError {
         doc = docs_rs_links!()
     )]
     NoRealSolution,
+    /// A rate solve is satisfied by **every** rate, so no single one is the answer.
+    ///
+    /// The opposite failure to [`NoRealSolution`](Self::NoRealSolution): there the
+    /// closed form proves no rate works; here it proves they all do, because the
+    /// annuity factor does not depend on the rate at all. That happens when
+    /// [`annuity::rate_from_future`] is given a single period — one payment made at
+    /// the end of period 1 is never compounded, so the future value is the payment
+    /// whatever the rate — and the target equals the payment.
+    ///
+    /// The inputs are under-determined rather than wrong: supply a longer term, or
+    /// solve for something the inputs do pin down (ADR-0056).
+    #[cfg_attr(
+        not(any(feature = "std", feature = "libm")),
+        doc = docs_rs_links!()
+    )]
+    IndeterminateRate,
     /// A period count was negative or not finite.
     NegativePeriods,
     /// A duration in years, given as a plain `f64`, was not finite (`NaN` or an
@@ -468,6 +485,9 @@ impl fmt::Display for TvmError {
                 "payment does not reduce the balance it is meant to retire, so the balance is never amortised",
             ),
             Self::NoRealSolution => f.write_str("no real solution exists for these inputs"),
+            Self::IndeterminateRate => {
+                f.write_str("every rate satisfies these inputs, so no single rate is the answer")
+            }
             Self::NegativePeriods => f.write_str("period count must be finite and non-negative"),
             Self::NonFiniteOffset => f.write_str("dated cashflow year-offset must be finite"),
             Self::EmptyCashflows => f.write_str("cashflow series is empty"),

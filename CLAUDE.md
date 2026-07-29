@@ -93,7 +93,18 @@ Two standing rules; ADR-0045 has the full statement and rationale.
   nix develop -c cargo test --doc --workspace --all-features                        # doctests
   nix develop .#msrv -c cargo build -p time_value --all-features                    # core MSRV (1.85): build, not test, so dev-deps don't gate it
   nix develop -c cargo deny check
+  RUSTDOCFLAGS="-D warnings" nix develop -c cargo doc -p time_value --no-deps                 # rustdoc, default features
+  RUSTDOCFLAGS="-D warnings" nix develop -c cargo doc -p time_value --no-deps --all-features  # rustdoc, all features
   ```
+
+  **Run the two `cargo doc` lines too** — CI does (ADR-0055), and they catch a
+  class nothing else does: an intra-doc link to an item that exists only behind a
+  feature resolves under `--all-features` and breaks under the default `no_std`
+  build. When a doc comment on an always-present item (a `TvmError` variant, say)
+  needs to name a feature-gated one, add the path to the `docs_rs_links!` macro in
+  `lib.rs` and attach it with `#[cfg_attr(not(any(feature = "std", feature =
+  "libm")), doc = docs_rs_links!())]`, which substitutes a docs.rs URL when the
+  target is absent.
 
   The core `time_value` crate keeps a conservative **MSRV of 1.85** (declared per
   crate, below the workspace's 1.88 toolchain, which the MCP crate's deps force);

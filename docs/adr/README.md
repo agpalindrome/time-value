@@ -74,3 +74,4 @@ the old one **Superseded** (link both ways) — don't rewrite the old one.
 | [0053](0053-fxrate-domain-and-currency-ordering.md) | `FxRate`'s domain is closed under reciprocal, `from` → `source`, and `Currency`'s ordering policy | Accepted (amends 0034) |
 | [0054](0054-numeric-robustness-of-the-core-operations.md) | Numeric robustness — schedule termination, rounding finiteness, cancellation-free annuity factors, and what counts as a root | Accepted (amends 0020, 0021, 0027) |
 | [0055](0055-publish-readiness-of-the-packaged-crate.md) | Publish readiness — what ships in the tarball, and a README that cannot rot | Accepted (amends 0006) |
+| [0056](0056-degenerate-rate-solves.md) | Degenerate rate solves report the degeneracy rather than the scan sentinel | Accepted (amends 0025, 0052) |
