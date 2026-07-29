@@ -457,6 +457,57 @@ mod tests {
         );
     }
 
+    /// The other side of `with_payment`'s fold: ADR-0034's identity rule, so an
+    /// agnostic payment against a denominated principal (or the reverse) yields a
+    /// schedule denominated in the one currency named — and every row of it is,
+    /// since `next` stamps the folded currency on all four amounts. Exhaustive over
+    /// the closed currency set; the `Xxx` iteration is the all-agnostic case.
+    #[test]
+    fn a_schedule_adopts_the_one_currency_its_inputs_name() {
+        use crate::Currency;
+        for &currency in Currency::ALL {
+            for (payment, principal) in [
+                // Agnostic payment, denominated principal — and the reverse.
+                (
+                    Money::agnostic(500.0).unwrap(),
+                    Money::new(1000.0, currency).unwrap(),
+                ),
+                (
+                    Money::new(500.0, currency).unwrap(),
+                    Money::agnostic(1000.0).unwrap(),
+                ),
+                // Both denominated the same way: equal currencies pass through.
+                (
+                    Money::new(500.0, currency).unwrap(),
+                    Money::new(1000.0, currency).unwrap(),
+                ),
+            ] {
+                let schedule =
+                    Schedule::with_payment(rate(0.10), Payment(payment), Principal(principal))
+                        .unwrap();
+                let mut rows = 0;
+                for installment in schedule {
+                    rows += 1;
+                    for amount in [
+                        installment.payment(),
+                        installment.interest(),
+                        installment.principal(),
+                        installment.balance(),
+                    ] {
+                        assert_eq!(
+                            amount.currency(),
+                            currency,
+                            "a {} schedule yielded a row denominated in {}",
+                            currency.code(),
+                            amount.currency().code(),
+                        );
+                    }
+                }
+                assert_eq!(rows, 3, "the 1000-at-10%-paying-500 schedule is 3 periods");
+            }
+        }
+    }
+
     /// The defect ADR-0054 fixes: each of these constructed `Ok` and then iterated
     /// forever, because the principal reduction was below the ULP of the balance
     /// so `balance - principal == balance`. They stall in the *first* period, so

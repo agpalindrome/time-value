@@ -38,7 +38,9 @@ use crate::results::{ScalarOutput, ScheduleResult};
 #[derive(Parser)]
 #[command(name = "time-value", version, about)]
 struct Cli {
-    /// Print the result as a one-field JSON object instead of a plain number.
+    /// Print the result as a JSON object instead of a plain number: `{ "value":
+    /// … }`, plus a `"currency"` field for a monetary result in a non-`XXX`
+    /// currency, or `{ "schedule": [ … ] }` for `amortize`.
     #[arg(long, global = true)]
     json: bool,
 
