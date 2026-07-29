@@ -246,6 +246,64 @@ proptest! {
         }
         prop_assert_eq!(previous, Money::ZERO);
     }
+
+    /// **Every** schedule terminates — not only the ones `amortizing_schedule`
+    /// constructs to be well behaved. The generators here range over the whole
+    /// `with_payment` domain, including negative rates, payments a hair above the
+    /// first period's interest, and payments far below it, so they reach the
+    /// shapes that used to iterate forever: a principal reduction smaller than the
+    /// ULP of the balance leaves `balance − principal == balance` and the schedule
+    /// never moves again (ADR-0054).
+    ///
+    /// `take` bounds the work, and the assertion is that the bound was *not*
+    /// reached — a schedule that ends on its own, rather than one merely cut short.
+    /// The cap is far above any real loan; the longest healthy case these ranges
+    /// produce is a few thousand periods.
+    #[test]
+    fn every_schedule_terminates(
+        rate in -0.5f64..0.5,
+        principal in 1.0f64..1e9,
+        payment in -1e6f64..1e6,
+    ) {
+        const CAP: usize = 200_000;
+
+        let schedule = Schedule::<Monthly>::with_payment(
+            Rate::<Monthly>::new(rate).unwrap(),
+            Payment(Money::agnostic(payment).unwrap()),
+            Principal(Money::agnostic(principal).unwrap()),
+        );
+        // A rejected loan is terminated too — loudly, at construction.
+        if let Ok(schedule) = schedule {
+            prop_assert!(schedule.take(CAP).count() < CAP);
+        }
+    }
+
+    /// Every installment a schedule yields strictly reduces the balance. That is
+    /// what makes termination structural rather than incidental: the balance is a
+    /// strictly decreasing sequence bounded below, and in `f64` a strictly
+    /// decreasing sequence is finite. Unlike
+    /// `the_balance_falls_monotonically_to_zero`, this holds over the *whole*
+    /// domain — it does not claim the balance reaches zero, only that it always
+    /// moves (ADR-0054).
+    #[test]
+    fn no_installment_ever_leaves_the_balance_where_it_was(
+        rate in -0.5f64..0.5,
+        principal in 1.0f64..1e9,
+        payment in -1e6f64..1e6,
+    ) {
+        let Ok(schedule) = Schedule::<Monthly>::with_payment(
+            Rate::<Monthly>::new(rate).unwrap(),
+            Payment(Money::agnostic(payment).unwrap()),
+            Principal(Money::agnostic(principal).unwrap()),
+        ) else {
+            return Ok(());
+        };
+        let mut previous = principal;
+        for installment in schedule.take(200_000) {
+            prop_assert!(installment.balance().value() < previous);
+            previous = installment.balance().value();
+        }
+    }
 }
 
 #[cfg(any(feature = "std", feature = "libm"))]
@@ -793,6 +851,95 @@ proptest! {
             .unwrap()
             .value();
         prop_assert!(close(npv, sum, 1e-6));
+    }
+
+    /// The annuity present value is **non-increasing** in the discount rate:
+    /// discount a positive stream harder and it is worth no more. This is the
+    /// property `annuity::rate`'s rustdoc cites as the reason its residual has a
+    /// single root, so it is the correctness argument for solving, not a nicety —
+    /// and the literal `(1 - (1+r)⁻ⁿ)/r` broke it in a band around zero, where
+    /// cancellation left the factor *rising* with the rate and the solver
+    /// answering with the wrong sign (ADR-0054).
+    ///
+    /// The generated pair is deliberately allowed to be arbitrarily close, and the
+    /// `1e-12` band around zero is sampled directly, because that is exactly where
+    /// the closed form failed.
+    #[test]
+    fn the_annuity_present_value_is_non_increasing_in_the_rate(
+        low in -0.9f64..2.0,
+        gap in 0.0f64..2.0,
+        periods in 1.0f64..600.0,
+        payment in 1.0f64..1e6,
+    ) {
+        use time_value::{annuity, Period};
+
+        let payment = Money::agnostic(payment).unwrap();
+        let periods = Period::<Monthly>::new(periods).unwrap();
+        let pv = |r: f64| {
+            annuity::present_value(Rate::<Monthly>::new(r).unwrap(), periods, payment)
+                .map(Money::value)
+        };
+        // A rate near −100% over a long term compounds the discount factor past
+        // `f64::MAX`, which is an `Overflow` rather than a value to compare
+        // (ADR-0021). Ordering is only claimed where both ends have one.
+        if let (Ok(lower), Ok(higher)) = (pv(low), pv(low + gap)) {
+            prop_assert!(lower >= higher, "PV rose from {lower} to {higher}");
+        }
+    }
+
+    /// The same law, sampled where it actually broke: an interval straddling zero
+    /// at the scale of the cancellation. Split out from the wide-range property so
+    /// the generator cannot spend its budget on comfortable rates and miss the one
+    /// decade that mattered.
+    #[test]
+    fn the_annuity_present_value_is_non_increasing_across_a_zero_rate(
+        low in -1e-7f64..0.0,
+        high in 0.0f64..1e-7,
+        periods in 1.0f64..600.0,
+    ) {
+        use time_value::{annuity, Period};
+
+        let payment = Money::agnostic(1000.0).unwrap();
+        let periods = Period::<Monthly>::new(periods).unwrap();
+        let pv = |r: f64| {
+            annuity::present_value(Rate::<Monthly>::new(r).unwrap(), periods, payment)
+                .unwrap()
+                .value()
+        };
+        prop_assert!(pv(low) >= pv(0.0));
+        prop_assert!(pv(0.0) >= pv(high));
+    }
+
+    /// Rounding a `Money` yields a `Money`, and every `Money` is finite (money.rs,
+    /// lib.rs). The existing rounding properties bound the magnitude to `±1e9`,
+    /// which is why they never saw `round_to_currency` scale a large amount to
+    /// `inf` and write it straight into the struct: for `USD` the boundary is
+    /// `f64::MAX / 100 ≈ 1.8e306` (ADR-0054). This one ranges over the entire
+    /// exponent, so the boundary is inside the domain rather than outside it.
+    #[test]
+    fn rounding_any_representable_amount_stays_finite(
+        mantissa in -10.0f64..10.0,
+        exponent in -320i32..309,
+        index in 0usize..time_value::Currency::ALL.len(),
+    ) {
+        let magnitude = mantissa * 10.0f64.powi(exponent);
+        prop_assume!(magnitude.is_finite());
+
+        let currency = time_value::Currency::ALL[index];
+        let rounded = Money::new(magnitude, currency).unwrap().round_to_currency();
+        prop_assert!(rounded.value().is_finite());
+        prop_assert_eq!(rounded.currency(), currency);
+
+        // Above `2^53` every `f64` is already an integer, so it is already an exact
+        // multiple of any minor unit and rounding has nothing to do — which is what
+        // makes returning the amount unchanged on overflow *exact* rather than a
+        // fallback. (Scaling up and back can still cost a couple of ULP where the
+        // scaling does happen, hence the relative band rather than equality; the
+        // `rounding_a_huge_magnitude_stays_finite_and_unchanged` unit test pins the
+        // overflow boundary itself exactly.)
+        if !close(magnitude, 0.0, 9.1e15) {
+            prop_assert!(close(rounded.value(), magnitude, 1e-12 * magnitude.abs()));
+        }
     }
 }
 

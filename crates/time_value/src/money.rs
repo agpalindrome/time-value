@@ -215,6 +215,19 @@ impl Money {
     ///
     /// Requires the `std` or `libm` feature (it rounds an `f64`).
     ///
+    /// # Every result is still finite
+    ///
+    /// Rounding scales up, rounds, and scales back down, and the scaling up can
+    /// overflow: `f64::MAX * 100.0` is `inf`, which written into a `Money` would
+    /// break the crate's headline invariant (ADR-0054). A magnitude whose scaled
+    /// form is not finite is therefore returned **unchanged**, which is not a
+    /// fallback but the *exact* answer: overflow needs
+    /// `|magnitude| > f64::MAX / scale`, at least `≈1.8e304`, and every `f64`
+    /// above `2⁵³ ≈ 9.0e15` is already an integer — so such a magnitude is
+    /// already an exact multiple of any minor unit and rounding it is the
+    /// identity. Only the multiplication can overflow: if `magnitude · scale` is
+    /// finite then so is `round(magnitude · scale) / scale`, because `scale ≥ 1`.
+    ///
     /// ```
     /// use time_value::{Currency, Money};
     ///
@@ -223,21 +236,29 @@ impl Money {
     ///
     /// let jpy = Money::new(1234.9, Currency::Jpy)?.round_to_currency();
     /// assert_eq!(jpy.value(), 1235.0); // no minor unit
+    ///
+    /// // A magnitude too large to scale is already whole, so it is unchanged —
+    /// // and, in particular, still finite.
+    /// let huge = Money::new(f64::MAX, Currency::Usd)?.round_to_currency();
+    /// assert!(huge.value().is_finite());
     /// # Ok::<(), time_value::TvmError>(())
     /// ```
     #[cfg(any(feature = "std", feature = "libm"))]
     #[must_use]
     pub fn round_to_currency(self) -> Self {
-        match self.currency.minor_unit_exponent() {
-            // Exact small integer scales — avoids a transcendental `powi`.
-            Some(exponent) => {
-                let scale = [1.0, 10.0, 100.0, 1000.0, 10_000.0][exponent as usize];
-                Self {
-                    magnitude: crate::math::round(self.magnitude * scale) / scale,
-                    currency: self.currency,
-                }
-            }
-            None => self,
+        let Some(exponent) = self.currency.minor_unit_exponent() else {
+            return self; // no minor unit
+        };
+        let Some(scale) = minor_unit_scale(exponent) else {
+            return self; // an exponent beyond the table — unreachable today
+        };
+        let scaled = self.magnitude * scale;
+        if !scaled.is_finite() {
+            return self; // already whole; see "Every result is still finite"
+        }
+        Self {
+            magnitude: crate::math::round(scaled) / scale,
+            currency: self.currency,
         }
     }
 
@@ -276,6 +297,31 @@ impl Money {
         }
         Self::from_operation(self.magnitude * fx.rate, fx.to)
     }
+}
+
+/// `10ᵉ` as an exact `f64`, for a currency's minor-unit exponent — the scale
+/// [`Money::round_to_currency`] rounds at.
+///
+/// A **total** function, unlike the fixed array it replaces: that array had
+/// exactly five slots for the exponents ISO 4217 actually uses (`{0, 2, 3, 4}`),
+/// so it carried zero headroom and a future code with five decimals would have
+/// been an out-of-bounds panic on a `#[must_use] -> Self` method that cannot
+/// report failure (ADR-0054). An exponent past the table is `None`, and
+/// `round_to_currency` then leaves the amount alone rather than panicking. The
+/// `every_currency_has_a_minor_unit_scale` test keeps that arm unreachable by
+/// checking every [`Currency::ALL`](crate::Currency::ALL) entry against it, so a
+/// new currency that outgrows the table fails a test rather than shipping.
+#[cfg(any(feature = "std", feature = "libm"))]
+const fn minor_unit_scale(exponent: u8) -> Option<f64> {
+    // Exact small integer scales — avoids a transcendental `powi`.
+    Some(match exponent {
+        0 => 1.0,
+        1 => 10.0,
+        2 => 100.0,
+        3 => 1_000.0,
+        4 => 10_000.0,
+        _ => return None,
+    })
 }
 
 /// Combines two currencies by the [`Currency::Xxx`] identity rule (ADR-0034): an
@@ -710,6 +756,60 @@ mod tests {
             .round_to_currency();
         assert_eq!(gold.value(), 1.23456);
         assert_eq!(gold.currency(), Currency::Xau);
+    }
+
+    /// Rounding used to write `magnitude * scale` straight into the struct, so a
+    /// large magnitude produced an **infinite** `Money` — the one thing the type
+    /// promises never to hold (ADR-0054). The boundary is `f64::MAX / scale`, so
+    /// it depends on the currency's minor unit: `JPY` (scale `1`) can never
+    /// overflow, `BHD` (scale `1000`) overflows two decades sooner than `USD`.
+    #[cfg(any(feature = "std", feature = "libm"))]
+    #[test]
+    fn rounding_a_huge_magnitude_stays_finite_and_unchanged() {
+        for currency in [
+            Currency::Usd,
+            Currency::Jpy,
+            Currency::Bhd,
+            Currency::Clf,
+            Currency::Xau,
+        ] {
+            for magnitude in [f64::MAX, -f64::MAX, 1.8e306, 1e300, 1e16] {
+                let rounded = Money::new(magnitude, currency).unwrap().round_to_currency();
+                assert!(
+                    rounded.value().is_finite(),
+                    "{magnitude:e} in {} rounded to a non-finite value",
+                    currency.code(),
+                );
+                // Above 2^53 every f64 is already an integer, so it is already an
+                // exact multiple of any minor unit: rounding is the identity.
+                assert_eq!(
+                    rounded.value(),
+                    magnitude,
+                    "{magnitude:e} in {} was altered by rounding",
+                    currency.code(),
+                );
+                assert_eq!(rounded.currency(), currency);
+            }
+        }
+    }
+
+    /// `round_to_currency` looks its scale up by minor-unit exponent. The lookup
+    /// must cover every currency the crate knows, or the amount would silently
+    /// pass through unrounded (and, in the array form this replaced, panic).
+    /// ADR-0045 rule 2: the finite domain is checked exhaustively, not sampled.
+    #[cfg(any(feature = "std", feature = "libm"))]
+    #[test]
+    fn every_currency_has_a_minor_unit_scale() {
+        for &currency in Currency::ALL {
+            let Some(exponent) = currency.minor_unit_exponent() else {
+                continue;
+            };
+            assert!(
+                super::minor_unit_scale(exponent).is_some(),
+                "{} has minor-unit exponent {exponent}, beyond the scale table",
+                currency.code(),
+            );
+        }
     }
 
     #[test]

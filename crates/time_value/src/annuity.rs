@@ -37,14 +37,16 @@
 //! );
 //! ```
 
-use crate::math::{ln, powf};
-use crate::root::{abs, bracket_and_bisect, relative_tolerance};
+use crate::math::{exp_m1, ln, ln_1p, powf};
+use crate::root::{abs, bracket_and_bisect, Residual};
 use crate::{
     FutureValue, Growth, Money, Payment, Period, Periodicity, PresentValue, Rate, TvmError,
 };
 
-/// Rate magnitude below which the `r → 0` limit is used instead of the closed
-/// form (which is `0/0` at exactly `r = 0` and ill-conditioned near it).
+/// Rate magnitude below which a **logarithmic** solve takes its `r → 0` limit
+/// instead of the closed form (which divides by `ln(1 + r)`, ill-conditioned near
+/// zero). The annuity *factors* need no such band — they are exact at every rate
+/// but `0` itself (ADR-0054).
 const RATE_NEAR_ZERO: f64 = 1e-9;
 
 fn near_zero(x: f64) -> bool {
@@ -52,56 +54,75 @@ fn near_zero(x: f64) -> bool {
 }
 
 /// The present-value annuity factor `(1 - (1 + r)⁻ⁿ) / r`, taking the limit `n`
-/// as `r → 0`.
+/// at `r = 0`.
+///
+/// Evaluated as `−expm1(−n·ln1p(r)) / r` rather than from the literal closed form
+/// (ADR-0054). Written literally, `(1 + r)⁻ⁿ` is a number just below `1` for small
+/// `r`, and subtracting it from `1` cancels away every significant digit of the
+/// answer: at `r = 1e-9, n = 12` the literal form made the factor *rise* with the
+/// rate — `12.000000882` against a true `11.999999922` — which is not merely
+/// imprecise but the wrong sign of change. `expm1`/`ln1p` compute the same
+/// quantity without ever forming the near-`1` intermediate, so the factor is
+/// accurate to a few ULP everywhere and stays **monotone** in `r`, which is the
+/// property [`solve_rate`] relies on to have a unique root.
 fn present_value_factor(rate: f64, periods: f64) -> f64 {
-    if near_zero(rate) {
+    if rate == 0.0 {
         periods
     } else {
-        (1.0 - powf(1.0 + rate, -periods)) / rate
+        -exp_m1(-periods * ln_1p(rate)) / rate
     }
 }
 
-/// The future-value annuity factor `((1 + r)ⁿ - 1) / r`, taking the limit `n` as
-/// `r → 0`.
+/// The future-value annuity factor `((1 + r)ⁿ - 1) / r`, taking the limit `n` at
+/// `r = 0`.
+///
+/// The mirror of [`present_value_factor`], with the same cancellation and the same
+/// fix: `(1 + r)ⁿ` is just *above* `1` for small `r`, so subtracting `1` loses the
+/// answer. Evaluated as `expm1(n·ln1p(r)) / r`.
 fn future_value_factor(rate: f64, periods: f64) -> f64 {
-    if near_zero(rate) {
+    if rate == 0.0 {
         periods
     } else {
-        (powf(1.0 + rate, periods) - 1.0) / rate
+        exp_m1(periods * ln_1p(rate)) / rate
     }
 }
 
 /// The present-value factor for a **growing** annuity,
-/// `(1 - ((1 + g)/(1 + r))ⁿ) / (r - g)`, taking the limit `n / (1 + r)` as
-/// `g → r` (ADR-0048).
+/// `(1 - ((1 + g)/(1 + r))ⁿ) / (r - g)`, taking the limit `n / (1 + r)` at
+/// `g = r` (ADR-0048).
 ///
-/// The limit is taken on the *spread* `r - g` rather than on `r` alone: the
-/// closed form is `0/0` when the discount rate exactly matches the growth rate
-/// (every payment then discounts to the same present amount), and
-/// ill-conditioned near it — the same bargain [`present_value_factor`] makes at
-/// `r ≈ 0`, which remains the `g = 0` case of this one.
+/// The limit is taken on the *spread* `r - g` rather than on `r` alone: the closed
+/// form is `0/0` when the discount rate exactly matches the growth rate (every
+/// payment then discounts to the same present amount).
+///
+/// Evaluated as `−expm1(n·ln1p(−spread / (1 + r))) / spread`, the same
+/// cancellation-free shape as [`present_value_factor`] — which is its `g = 0` case,
+/// since `ln1p(−r/(1 + r)) = −ln1p(r)`. Note the ratio `(1 + g)/(1 + r)` is never
+/// formed: rewriting it as `1 − spread/(1 + r)` keeps the whole computation in
+/// terms of the spread, so the factor is accurate right down to the limit instead
+/// of needing a fuzzy band around it (ADR-0054).
 fn growing_present_value_factor(rate: f64, growth: f64, periods: f64) -> f64 {
     let spread = rate - growth;
-    if near_zero(spread) {
+    if spread == 0.0 {
         periods / (1.0 + rate)
     } else {
-        (1.0 - powf((1.0 + growth) / (1.0 + rate), periods)) / spread
+        -exp_m1(periods * ln_1p(-spread / (1.0 + rate))) / spread
     }
 }
 
 /// The future-value factor for a **growing** annuity,
-/// `((1 + r)ⁿ - (1 + g)ⁿ) / (r - g)`, taking the limit `n · (1 + r)ⁿ⁻¹` as
-/// `g → r` (ADR-0048).
+/// `((1 + r)ⁿ - (1 + g)ⁿ) / (r - g)`, taking the limit `n · (1 + r)ⁿ⁻¹` at `g = r`
+/// (ADR-0048).
 ///
-/// This is [`growing_present_value_factor`] compounded forward by `(1 + r)ⁿ`,
-/// and reduces to [`future_value_factor`] at `g = 0`.
+/// Computed as exactly what its docs have always said it is —
+/// [`growing_present_value_factor`] compounded forward by `(1 + r)ⁿ` — rather than
+/// as a second closed form differencing two powers, which cancels for a small
+/// spread the way the present-value form did. The identity also carries the limit:
+/// `(1 + r)ⁿ · n/(1 + r)` *is* `n · (1 + r)ⁿ⁻¹`, so there is one limit branch
+/// between the two factors instead of two that must be kept in step. It reduces to
+/// [`future_value_factor`] at `g = 0`.
 fn growing_future_value_factor(rate: f64, growth: f64, periods: f64) -> f64 {
-    let spread = rate - growth;
-    if near_zero(spread) {
-        periods * powf(1.0 + rate, periods - 1.0)
-    } else {
-        (powf(1.0 + rate, periods) - powf(1.0 + growth, periods)) / spread
-    }
+    powf(1.0 + rate, periods) * growing_present_value_factor(rate, growth, periods)
 }
 
 /// The present value of an ordinary annuity that pays `payment` at the end of
@@ -605,18 +626,30 @@ pub fn rate_from_future<P: Periodicity>(
 /// Solve `payment · factor(r, periods) = target` for the per-period rate `r`.
 ///
 /// `factor` is [`present_value_factor`] or [`future_value_factor`]; both are
-/// monotone in `r`, so the residual has a single root, located by the shared
-/// bracketing bisection ([`root::bracket_and_bisect`](crate::root)). The
-/// tolerance is relative to the target magnitude (floored at `1`), mirroring the
-/// IRR convergence check (ADR-0021).
+/// monotone in `r` — a property the `expm1`/`ln1p` formulation exists to make
+/// true in floating point and not merely in algebra (ADR-0054) — so the residual
+/// has a single root, located by the shared bracketing bisection
+/// ([`root::bracket_and_bisect`](crate::root)).
+///
+/// The residual is judged against the scale of the two quantities differenced to
+/// form it, `|PMT·factor(r,n)| + |target|`, evaluated at the same `r`. A tolerance
+/// fixed in advance from `|target|` alone would, for a target near zero, accept
+/// any rate large enough to drive the priced value to nothing — the same loophole
+/// [`Residual::is_root`](crate::root) closes for the IRR (ADR-0021, ADR-0054).
 fn solve_rate<P: Periodicity>(
     periods: f64,
     payment: f64,
     target: f64,
     factor: impl Fn(f64, f64) -> f64,
 ) -> Result<Rate<P>, TvmError> {
-    let tolerance = relative_tolerance(abs(target));
-    match bracket_and_bisect(|r| payment * factor(r, periods) - target, tolerance) {
+    let residual = |r: f64| {
+        let priced = payment * factor(r, periods);
+        Residual {
+            value: priced - target,
+            scale: abs(priced) + abs(target),
+        }
+    };
+    match bracket_and_bisect(residual) {
         Some(r) => Rate::from_operation(r),
         None => Err(TvmError::SolveDidNotConverge),
     }
@@ -1132,6 +1165,121 @@ mod tests {
         assert!(approx(recovered.value(), -0.02, 1e-6));
     }
 
+    /// The cancellation defect ADR-0054 fixes, at the exact point it was
+    /// reproduced: `(1 - (1+r)⁻ⁿ)/r` at `r = 1e-9, n = 12` priced 12 payments of
+    /// 100 at `12000.000881862` — *above* the `r = 0` value of `12000`, which no
+    /// positive rate can produce. The true value is `11999.999922000000364`.
+    #[test]
+    fn present_value_near_a_zero_rate_is_accurate() {
+        let payment = Money::agnostic(1000.0).unwrap();
+        let periods = Period::new(12.0).unwrap();
+        let pv = |r: f64| {
+            annuity::present_value(rate(r), periods, payment)
+                .unwrap()
+                .value()
+        };
+        // Correct to well within a cent on a 12000 stream; the defect was 0.0009
+        // out and on the wrong side.
+        assert!(approx(pv(1e-9), 11_999.999_922, 1e-6));
+        assert!(approx(pv(5e-10), 11_999.999_961, 1e-6));
+        assert!(approx(pv(0.0), 12_000.0, 1e-9));
+    }
+
+    /// The present-value factor is **non-increasing** in the rate — money later is
+    /// worth less when discounting harder. `solve_rate`'s rustdoc cites exactly
+    /// this monotonicity as the reason its residual has a single root, so it has to
+    /// hold in floating point and not only in algebra (ADR-0045 rule 2, ADR-0054).
+    /// The literal closed form broke it in a band around zero.
+    #[test]
+    fn present_value_is_non_increasing_in_the_rate() {
+        let payment = Money::agnostic(1000.0).unwrap();
+        for n in [1.0, 12.0, 30.0, 360.0] {
+            let periods = Period::new(n).unwrap();
+            let pv = |r: f64| {
+                annuity::present_value(rate(r), periods, payment)
+                    .unwrap()
+                    .value()
+            };
+            // A grid straddling zero at the scale where the cancellation bit,
+            // plus ordinary rates either side.
+            let mut previous = f64::INFINITY;
+            let mut r = -2e-8;
+            while r <= 2e-8 {
+                let current = pv(r);
+                assert!(
+                    current <= previous,
+                    "PV rose from {previous} to {current} between rates either side of {r} (n = {n})",
+                );
+                previous = current;
+                r += 1e-10;
+            }
+            // And the far field, where the factor saturates.
+            let mut previous = f64::INFINITY;
+            for r in [-0.5, -0.02, -1e-4, 0.0, 1e-4, 0.02, 0.5, 5.0, 100.0] {
+                let current = pv(r);
+                assert!(current <= previous, "PV rose at rate {r} (n = {n})");
+                previous = current;
+            }
+        }
+    }
+
+    /// The future-value factor has the mirror-image cancellation — `(1+r)ⁿ` is just
+    /// *above* one for a small rate — and the mirror-image monotonicity: it is
+    /// non-**de**creasing in the rate.
+    #[test]
+    fn future_value_is_non_decreasing_in_the_rate() {
+        let payment = Money::agnostic(1000.0).unwrap();
+        let periods = Period::new(12.0).unwrap();
+        let fv = |r: f64| {
+            annuity::future_value(rate(r), periods, payment)
+                .unwrap()
+                .value()
+        };
+        let mut previous = f64::NEG_INFINITY;
+        let mut r = -2e-8;
+        while r <= 2e-8 {
+            let current = fv(r);
+            assert!(
+                current >= previous,
+                "FV fell from {previous} to {current} around rate {r}",
+            );
+            previous = current;
+            r += 1e-10;
+        }
+        // 12 payments of 1000 at 1e-9/period: each earns interest for a whole
+        // number of periods, so FV = 1000·(12 + 66e-9) to first order.
+        assert!(approx(fv(1e-9), 12_000.000_066, 1e-6));
+    }
+
+    /// `rate` inverts `present_value`, so round-tripping the library's own PV must
+    /// return the rate that produced it — *including its sign*. The cancellation
+    /// defect made a true rate of `+1e-9` solve to `−1.12e-8` (ADR-0054).
+    #[test]
+    fn rate_round_trips_a_near_zero_rate_with_the_right_sign() {
+        let payment = Money::agnostic(1000.0).unwrap();
+        let periods = Period::new(12.0).unwrap();
+        for r in [1e-9, 5e-10, 1e-8, -1e-9, -1e-8] {
+            let present = annuity::present_value(rate(r), periods, payment).unwrap();
+            let recovered =
+                annuity::rate::<Monthly>(periods, Payment(payment), PresentValue(present))
+                    .unwrap()
+                    .value();
+            assert!(
+                (recovered < 0.0) == (r < 0.0),
+                "rate {r} round-tripped to {recovered}, on the wrong side of zero",
+            );
+            // The residual tolerance is `1e-9 · (|priced| + |target|) ≈ 2.4e-5` on
+            // a 12000 present value, and `dPV/dr ≈ −PMT·n(n+1)/2 = −78000`, so the
+            // solver can resolve the rate to about `3e-10` and no finer. That is
+            // the floor this bound sits just above — the defect missed by `1.2e-8`
+            // at `r = 1e-9` and `2.6e-9` at `r = 5e-10`, both well outside it.
+            assert!(
+                approx(recovered, r, 1e-9),
+                "rate {r} round-tripped to {recovered}",
+            );
+        }
+    }
+
     #[test]
     fn rate_without_a_solution_does_not_converge() {
         // A positive payment can never price to a negative present value, so no
@@ -1271,6 +1419,67 @@ mod tests {
                 ),
                 Err(TvmError::DivergentPerpetuity),
             );
+        }
+
+        /// The growing factors carry the same cancellation as the level ones, and
+        /// take the same `expm1`/`ln1p` fix (ADR-0054). Checked against the
+        /// term-by-term summation at spreads far too small for the old
+        /// `|r − g| < 1e-9` limit band, which simply returned `n/(1+r)` and was
+        /// wrong in the eighth digit there.
+        #[test]
+        fn a_vanishing_spread_is_accurate_not_merely_bounded() {
+            for (r, g, n) in [
+                (0.05, 0.05 - 1e-9, 10u32),
+                (0.05, 0.05 - 1e-10, 10),
+                (0.05, 0.05 + 1e-9, 10),
+                (0.1, 0.1 - 1e-9, 30),
+            ] {
+                let pv = annuity::growing_present_value(
+                    rate(r),
+                    growth(g),
+                    Period::new(f64::from(n)).unwrap(),
+                    Money::agnostic(100.0).unwrap(),
+                )
+                .unwrap()
+                .value();
+                let expected = 100.0 * present_value_by_summation(r, g, n, 1.0);
+                assert!(
+                    approx(pv, expected, 1e-9),
+                    "r = {r}, g = {g}, n = {n}: got {pv}, summation says {expected}",
+                );
+            }
+        }
+
+        /// The `g = 0` case of the growing factor *is* the level factor, and the
+        /// future-value factor *is* the present-value one compounded forward — both
+        /// relations the rustdoc asserts, and the second is now how
+        /// `growing_future_value_factor` is computed, so the identity is exact
+        /// rather than approximate (ADR-0045 rule 2).
+        #[test]
+        fn zero_growth_recovers_the_level_annuity() {
+            let payment = Money::agnostic(100.0).unwrap();
+            for (r, n) in [(0.05, 12.0), (0.0, 12.0), (1e-9, 12.0), (-0.02, 30.0)] {
+                let periods = Period::new(n).unwrap();
+                let level = annuity::present_value(rate(r), periods, payment)
+                    .unwrap()
+                    .value();
+                let grown = annuity::growing_present_value(rate(r), growth(0.0), periods, payment)
+                    .unwrap()
+                    .value();
+                assert!(approx(level, grown, 1e-9), "r = {r}, n = {n}");
+
+                let level_future = annuity::future_value(rate(r), periods, payment)
+                    .unwrap()
+                    .value();
+                let grown_future =
+                    annuity::growing_future_value(rate(r), growth(0.0), periods, payment)
+                        .unwrap()
+                        .value();
+                assert!(
+                    approx(level_future, grown_future, 1e-8),
+                    "future: r = {r}, n = {n}",
+                );
+            }
         }
 
         #[test]
