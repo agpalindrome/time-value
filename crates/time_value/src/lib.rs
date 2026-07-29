@@ -184,6 +184,7 @@ macro_rules! docs_rs_links {
 [`annuity::periods`]: https://docs.rs/time_value/latest/time_value/annuity/fn.periods.html
 [`annuity::periods_from_future`]: https://docs.rs/time_value/latest/time_value/annuity/fn.periods_from_future.html
 [`annuity::rate`]: https://docs.rs/time_value/latest/time_value/annuity/fn.rate.html
+[`annuity::rate_from_future`]: https://docs.rs/time_value/latest/time_value/annuity/fn.rate_from_future.html
 [`annuity::perpetuity`]: https://docs.rs/time_value/latest/time_value/annuity/fn.perpetuity.html
 [`annuity::growing_perpetuity`]: https://docs.rs/time_value/latest/time_value/annuity/fn.growing_perpetuity.html
 [amortization::Schedule::for_term]: https://docs.rs/time_value/latest/time_value/amortization/struct.Schedule.html#method.for_term
