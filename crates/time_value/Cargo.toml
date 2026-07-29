@@ -9,7 +9,7 @@ rust-version = "1.85"
 license.workspace = true
 repository.workspace = true
 description = "Type-safe time-value-of-money calculations in Rust"
-homepage = "https://crates.io/crates/time_value"
+homepage = "https://github.com/ojhermann-org/time-value"
 documentation = "https://docs.rs/time_value"
 readme = "README.md"
 keywords = ["finance", "tvm", "npv", "irr", "annuity"]
@@ -21,6 +21,13 @@ categories = ["finance", "mathematics", "no-std"]
 # `std`/`libm` (ADR-0009). Build the docs with all features so the full surface
 # is documented and those links resolve.
 all-features = true
+# Set `--cfg docsrs` so the `#[cfg_attr(docsrs, doc(cfg(...)))]` attributes take
+# effect and every feature-gated item carries an "Available on crate feature …"
+# badge. Without it an `all-features` build renders gated and ungated items
+# side by side with nothing to tell them apart (ADR-0055). `doc_cfg` is a
+# nightly rustdoc feature, which is why it is reached through `docsrs` — a
+# stable `cargo doc` never sets the cfg and is unaffected.
+rustdoc-args = ["--cfg", "docsrs"]
 
 [lints]
 workspace = true

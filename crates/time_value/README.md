@@ -2,9 +2,10 @@
 
 Type-safe time-value-of-money (TVM) calculations in Rust.
 
-A deliberately type-heavy redesign of [`time_value`](https://crates.io/crates/time_value),
-rebuilt from scratch for the `1.0` line. The goal: make TVM mistakes — applying
-an annual rate to monthly cashflows, discounting with an economically
+A deliberately type-heavy redesign, rebuilt from scratch for the `1.0` line and
+sharing only its name with the [`0.x`
+series](https://crates.io/crates/time_value/0.8.0). The goal: make TVM mistakes —
+applying an annual rate to monthly cashflows, discounting with an economically
 meaningless rate — into *compile errors*, while keeping the common path
 ergonomic. `#![no_std]` and dependency-free by default.
 
@@ -12,10 +13,13 @@ ergonomic. `#![no_std]` and dependency-free by default.
 
 Values are validated newtypes, and **periodicity is part of the type**:
 
-- `Money` — an always-finite monetary amount (cashflows are signed: outflow
-  negative, inflow positive). Negate it with `-money`; add, subtract and scale it
-  with the fallible `try_add` / `try_sub` / `try_mul` / `try_div`, which return
-  an error rather than an infinity.
+- `Money` — a monetary amount: an always-finite `f64` magnitude plus the
+  `Currency` it is denominated in. Currency is a runtime *value*, not a type tag
+  — `Currency::Xxx` is the currency-agnostic identity, and combining two distinct
+  real currencies is a runtime `TvmError::CurrencyMismatch`. Cashflows are signed
+  (outflow negative, inflow positive). Negate it with `-money`; add, subtract and
+  scale it with the fallible `try_add` / `try_sub` / `try_mul` / `try_div`, which
+  return an error rather than an infinity.
 - `Rate<P>` — a per-period rate (finite, greater than −100%) tagged with a
   `Periodicity` marker `P` (`Annual`, `SemiAnnual`, `Quarterly`, `Monthly`,
   `Weekly`, `Daily`).
@@ -39,25 +43,56 @@ its role makes swapping them a compile error rather than a plausible wrong answe
 | Available on | Operations |
 |--------------|------------|
 | **any build** (`no_std`, zero dependencies) | `Cashflows::net_present_value` / `net_future_value` / `internal_rate_of_return`; nominal-rate conversion (`Rate::from_nominal_annual` / `nominal_annual`); and the allocation-free `amortization::Schedule` from an explicit payment (`with_payment`) — they need only elementary arithmetic |
-| **with `std` or `libm`** | single-sum `present_value` / `future_value` and their solve-for inverses `periods` (NPER) / `rate` (RATE); the `annuity` module — ordinary, annuity-`due`, `perpetuity` / `growing_perpetuity`, and the finite growing forms (`growing_present_value` / `growing_future_value`, with `due` counterparts), plus the `payment`, `periods`, and `rate` solves; the modified internal rate of return (`Cashflows::modified_internal_rate_of_return`); the term-based `amortization::Schedule::for_term`; effective rate conversion between periodicities (`Rate::convert` / `effective_annual`); and `DatedCashflows` (XNPV / XIRR over irregularly dated flows, discounted by year-fraction) — they need `powf` / `ln`, so they also admit a fractional number of periods |
+| **with `std` or `libm`** | single-sum `present_value` / `future_value` and their solve-for inverses `periods` (NPER) / `rate` (RATE); the `annuity` module — ordinary, annuity-`due`, `perpetuity` / `growing_perpetuity`, and the finite growing forms (`growing_present_value` / `growing_future_value`, with `due` counterparts), plus the `payment`, `periods`, and `rate` solves; the modified internal rate of return (`Cashflows::modified_internal_rate_of_return`); the term-based `amortization::Schedule::for_term`; effective rate conversion between periodicities (`Rate::convert` / `effective_annual`); the `continuous` module (compounding, discounting, and growth at a periodicity-free `ContinuousRate` — the force of interest — with conversions to and from a `Rate<Annual>`); and `DatedCashflows` (XNPV / XIRR over irregularly dated flows, discounted by year-fraction) — they need `powf` / `ln` / `exp`, so they also admit a fractional number of periods |
 
 ## Example
 
 ```rust
-use time_value::{Cashflows, Money, Monthly, Rate};
+use time_value::{Cashflows, Money, Monthly, Rate, TvmError};
 
-// Pay 100 now, receive 60 next month and 60 the month after.
-let flows = [Money::new(-100.0)?, Money::new(60.0)?, Money::new(60.0)?];
-let project = Cashflows::<Monthly>::new(&flows);
+fn main() -> Result<(), TvmError> {
+    // Pure-number TVM is currency-agnostic: pay 100 now, receive 60 next month
+    // and 60 the month after.
+    let flows = [
+        Money::agnostic(-100.0)?,
+        Money::agnostic(60.0)?,
+        Money::agnostic(60.0)?,
+    ];
+    let project = Cashflows::<Monthly>::new(&flows);
 
-let npv = project.net_present_value(Rate::<Monthly>::new(0.01)?);
-assert!(npv.value() > 0.0);                    // worth doing at 1%/month
+    // Worth doing at 1% a month.
+    let npv = project.net_present_value(Rate::<Monthly>::new(0.01)?)?;
+    assert!(npv.value() > 0.0);
 
-let irr = project.internal_rate_of_return()?;  // ≈ 0.1307 per month
+    // The rate at which it breaks even: about 13.07% a month.
+    let irr = project.internal_rate_of_return()?;
+    assert!((irr.value() - 0.1307).abs() < 1e-4);
+
+    Ok(())
+}
 ```
 
-(The constructors and `internal_rate_of_return` are fallible — `?` propagates a
-[`TvmError`].)
+Denominate an amount when the currency matters — it travels with the value and
+is checked at every combination:
+
+```rust
+use time_value::{Currency, Money, TvmError};
+
+fn main() -> Result<(), TvmError> {
+    let fee = Money::new(25.0, Currency::Usd)?;
+    let rent = Money::new(1_200.0, Currency::Usd)?;
+    assert_eq!(fee.try_add(rent)?.value(), 1_225.0);
+
+    // Two distinct real currencies do not combine.
+    let eur = Money::new(10.0, Currency::Eur)?;
+    assert!(fee.try_add(eur).is_err());
+
+    Ok(())
+}
+```
+
+The constructors and the operations that can fail return a [`TvmError`], so `?`
+carries them.
 
 [`TvmError`]: https://docs.rs/time_value/latest/time_value/enum.TvmError.html
 
@@ -81,8 +116,8 @@ workspace README for development setup.
 
 ## License
 
-Licensed under either of [Apache License, Version 2.0](../../LICENSE-APACHE) or
-[MIT license](../../LICENSE-MIT) at your option.
+Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or
+[MIT license](LICENSE-MIT) at your option.
 
 Unless you explicitly state otherwise, any contribution intentionally submitted
 for inclusion in this crate by you, as defined in the Apache-2.0 license, shall

@@ -48,8 +48,8 @@
 //! behind the optional `std` / `libm` features (see
 //! `docs/adr/0009-no_std-and-optional-libm.md`): the [`single_sum`] module
 //! (present/future value and the solve-for `periods` / `rate` inverses, with the
-//! [`Period<P>`] type), the [`annuity`] module (ordinary, [annuity-due](annuity::due),
-//! [perpetuity](annuity::perpetuity), and [growing-perpetuity](annuity::growing_perpetuity)
+//! [`Period<P>`] type), the [`annuity`] module (ordinary, [annuity-due][annuity::due],
+//! [perpetuity][annuity::perpetuity], and [growing-perpetuity][annuity::growing_perpetuity]
 //! forms, plus the `periods` / `rate` solves), the modified internal rate of return
 //! ([`Cashflows::modified_internal_rate_of_return`]), the term-based
 //! [`amortization`] constructor, effective rate conversions between
@@ -102,15 +102,51 @@
 //! ```
 //!
 //! [`Cashflows<P>`]: Cashflows
-//! [`Rate<P>`]: Rate
-//! [`Period<P>`]: Period
 //! [`net_present_value`]: Cashflows::net_present_value
 //! [`net_future_value`]: Cashflows::net_future_value
 //! [`internal_rate_of_return`]: Cashflows::internal_rate_of_return
-
+//! [`Rate<P>`]: Rate
+#![cfg_attr(any(feature = "std", feature = "libm"), doc = "[`Period<P>`]: Period")]
+// Most of the API above lives behind `std`/`libm` (or `alloc`), so in the
+// default `no_std` build those intra-doc links have no target and rustdoc warns
+// once per link — noise a downstream `cargo doc` would attribute to this crate
+// (ADR-0055). A markdown link *reference definition* takes precedence over
+// intra-doc resolution, so defining each gated target as its docs.rs URL when
+// the feature is off keeps the prose linked in every build: locally on docs.rs
+// (which builds `--all-features`), and out to the published docs otherwise. The
+// all-features build still resolves the same paths as intra-doc links, so a
+// rename is still caught there.
+#![cfg_attr(
+    not(any(feature = "std", feature = "libm")),
+    doc = "
+[`Period<P>`]: https://docs.rs/time_value/latest/time_value/struct.Period.html
+[`single_sum`]: https://docs.rs/time_value/latest/time_value/single_sum/index.html
+[`annuity`]: https://docs.rs/time_value/latest/time_value/annuity/index.html
+[annuity::due]: https://docs.rs/time_value/latest/time_value/annuity/due/index.html
+[annuity::perpetuity]: https://docs.rs/time_value/latest/time_value/annuity/fn.perpetuity.html
+[annuity::growing_perpetuity]: https://docs.rs/time_value/latest/time_value/annuity/fn.growing_perpetuity.html
+[`Cashflows::modified_internal_rate_of_return`]: https://docs.rs/time_value/latest/time_value/struct.Cashflows.html#method.modified_internal_rate_of_return
+[`Rate::convert`]: https://docs.rs/time_value/latest/time_value/struct.Rate.html#method.convert
+[`Rate::effective_annual`]: https://docs.rs/time_value/latest/time_value/struct.Rate.html#method.effective_annual
+[`DatedCashflows`]: https://docs.rs/time_value/latest/time_value/struct.DatedCashflows.html
+[`continuous`]: https://docs.rs/time_value/latest/time_value/continuous/index.html
+[`ContinuousRate`]: https://docs.rs/time_value/latest/time_value/struct.ContinuousRate.html
+"
+)]
+#![cfg_attr(
+    not(feature = "alloc"),
+    doc = "
+[`OwnedCashflows`]: https://docs.rs/time_value/latest/time_value/struct.OwnedCashflows.html
+"
+)]
 // `no_std` unless the `std` feature is enabled — the `std` feature turns this
 // into an ordinary `std` crate so it can use `f64`'s transcendental methods.
 #![cfg_attr(not(feature = "std"), no_std)]
+// docs.rs passes `--cfg docsrs` (see the `[package.metadata.docs.rs]`
+// `rustdoc-args`), which turns on rustdoc's nightly `doc_cfg` feature so every
+// feature-gated item renders with an "Available on crate feature …" badge
+// (ADR-0055). A stable build never sets the cfg, so it is unaffected.
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![forbid(unsafe_code)]
 
 // The owned `OwnedCashflows` series needs a `Vec`; pull in the `alloc` crate
@@ -118,6 +154,46 @@
 // (ADR-0043).
 #[cfg(feature = "alloc")]
 extern crate alloc;
+
+// The crate README is the crates.io front page, and it drifted out of step with
+// the API once already (ADR-0055). Compiling it as a doctest is the structural
+// cure: every fenced `rust` block in it now has to build and pass. `cfg(doctest)`
+// means the carrier exists only while rustdoc collects doctests — it is not part
+// of the public API and never appears in the rendered docs, so the README stays a
+// front page rather than being spliced into the crate documentation.
+#[cfg(doctest)]
+#[doc = include_str!("../README.md")]
+pub struct ReadmeDoctests;
+
+// The docs.rs targets for the feature-gated items named in the `TvmError`
+// variants' documentation. Same mechanism as the crate-level block above: a
+// markdown link reference definition beats intra-doc resolution, so in a build
+// where the item does not exist the prose links out to the published docs
+// instead of warning. Each variant's documentation is its own markdown
+// document, so the definitions have to be attached to each one; definitions a
+// given variant does not use are inert.
+#[cfg(not(any(feature = "std", feature = "libm")))]
+macro_rules! docs_rs_links {
+    () => {
+        "
+
+[`single_sum::rate`]: https://docs.rs/time_value/latest/time_value/single_sum/fn.rate.html
+[`single_sum::periods`]: https://docs.rs/time_value/latest/time_value/single_sum/fn.periods.html
+[`annuity::payment`]: https://docs.rs/time_value/latest/time_value/annuity/fn.payment.html
+[`annuity::due::payment`]: https://docs.rs/time_value/latest/time_value/annuity/due/fn.payment.html
+[`annuity::periods`]: https://docs.rs/time_value/latest/time_value/annuity/fn.periods.html
+[`annuity::periods_from_future`]: https://docs.rs/time_value/latest/time_value/annuity/fn.periods_from_future.html
+[`annuity::rate`]: https://docs.rs/time_value/latest/time_value/annuity/fn.rate.html
+[`annuity::perpetuity`]: https://docs.rs/time_value/latest/time_value/annuity/fn.perpetuity.html
+[`annuity::growing_perpetuity`]: https://docs.rs/time_value/latest/time_value/annuity/fn.growing_perpetuity.html
+[amortization::Schedule::for_term]: https://docs.rs/time_value/latest/time_value/amortization/struct.Schedule.html#method.for_term
+[`Cashflows::modified_internal_rate_of_return`]: https://docs.rs/time_value/latest/time_value/struct.Cashflows.html#method.modified_internal_rate_of_return
+[`ContinuousRate`]: https://docs.rs/time_value/latest/time_value/struct.ContinuousRate.html
+[`DatedCashflow`]: https://docs.rs/time_value/latest/time_value/struct.DatedCashflow.html
+[`continuous`]: https://docs.rs/time_value/latest/time_value/continuous/index.html
+"
+    };
+}
 
 pub mod amortization;
 mod cashflows;
@@ -130,6 +206,7 @@ mod root;
 
 pub use cashflows::Cashflows;
 #[cfg(feature = "alloc")]
+#[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
 pub use cashflows::OwnedCashflows;
 pub use currency::Currency;
 pub use money::{FxRate, Money};
@@ -140,8 +217,10 @@ pub use roles::{FutureValue, Growth, Payment, PresentValue, Principal};
 // Operations that need transcendental math (`powf`) are available only with the
 // `std` or `libm` feature (see `docs/adr/0014-transcendental-single-sum-operations.md`).
 #[cfg(any(feature = "std", feature = "libm"))]
+#[cfg_attr(docsrs, doc(cfg(any(feature = "std", feature = "libm"))))]
 pub mod annuity;
 #[cfg(any(feature = "std", feature = "libm"))]
+#[cfg_attr(docsrs, doc(cfg(any(feature = "std", feature = "libm"))))]
 pub mod continuous;
 #[cfg(any(feature = "std", feature = "libm"))]
 mod dated;
@@ -150,6 +229,7 @@ mod math;
 #[cfg(any(feature = "std", feature = "libm"))]
 mod period;
 #[cfg(any(feature = "std", feature = "libm"))]
+#[cfg_attr(docsrs, doc(cfg(any(feature = "std", feature = "libm"))))]
 pub mod single_sum;
 
 // The private `*Wire` structs shared by the `serde` and `schemars` impls, so the
@@ -161,19 +241,24 @@ mod wire;
 // (ADR-0042). The impls compose from the types' public API, so this is a leaf
 // module with nothing re-exported.
 #[cfg(feature = "serde")]
+#[cfg_attr(docsrs, doc(cfg(feature = "serde")))]
 mod serde_impls;
 
 // `schemars` (JsonSchema) support — the JSON-Schema companion to `serde`
 // (ADR-0044), also a leaf module of impls.
 #[cfg(feature = "schemars")]
+#[cfg_attr(docsrs, doc(cfg(feature = "schemars")))]
 mod schemars_impls;
 
 pub use amortization::{Installment, Schedule};
 #[cfg(any(feature = "std", feature = "libm"))]
+#[cfg_attr(docsrs, doc(cfg(any(feature = "std", feature = "libm"))))]
 pub use continuous::ContinuousRate;
 #[cfg(any(feature = "std", feature = "libm"))]
+#[cfg_attr(docsrs, doc(cfg(any(feature = "std", feature = "libm"))))]
 pub use dated::{DatedCashflow, DatedCashflows};
 #[cfg(any(feature = "std", feature = "libm"))]
+#[cfg_attr(docsrs, doc(cfg(any(feature = "std", feature = "libm"))))]
 pub use period::Period;
 
 use core::fmt;
@@ -190,6 +275,10 @@ pub enum TvmError {
     /// no `> -1` floor — any *finite* force of interest is valid (its effective
     /// growth factor `e^δ` is always positive) — so only non-finiteness is rejected
     /// (`docs/adr/0036-continuous-compounding-force-of-interest.md`).
+    #[cfg_attr(
+        not(any(feature = "std", feature = "libm")),
+        doc = docs_rs_links!()
+    )]
     NonFiniteRate,
     /// A monetary amount supplied to a constructor was not finite (`NaN` or an
     /// infinity). For a non-finite value *produced by an operation*, see
@@ -260,10 +349,14 @@ pub enum TvmError {
     /// `0`, the `n`-th root has no `n`.
     ///
     /// Returned by [`annuity::payment`], [`annuity::due::payment`],
-    /// [`single_sum::rate`], [`Schedule::for_term`](amortization::Schedule::for_term),
+    /// [`single_sum::rate`], [`Schedule::for_term`][amortization::Schedule::for_term],
     /// and [`Cashflows::modified_internal_rate_of_return`] on a single cashflow
     /// (ADR-0052). Distinct from [`NegativePeriods`](Self::NegativePeriods), which
     /// rejects a *negative* count.
+    #[cfg_attr(
+        not(any(feature = "std", feature = "libm")),
+        doc = docs_rs_links!()
+    )]
     ZeroPeriods,
     /// A level payment does not reduce the balance it is meant to retire, so the
     /// balance never falls and no finite term exists.
@@ -279,6 +372,10 @@ pub enum TvmError {
     /// ADR-0054).
     ///
     /// [`Schedule::with_payment`]: amortization::Schedule::with_payment
+    #[cfg_attr(
+        not(any(feature = "std", feature = "libm")),
+        doc = docs_rs_links!()
+    )]
     PaymentDoesNotAmortize,
     /// A solve has no real answer for the given inputs: the logarithm it needs has
     /// a non-positive argument, or the relationship is degenerate (a zero rate,
@@ -290,6 +387,10 @@ pub enum TvmError {
     /// [`SolveDidNotConverge`](Self::SolveDidNotConverge), where an answer may
     /// exist but the iteration did not find it: here the closed form proves there
     /// is none.
+    #[cfg_attr(
+        not(any(feature = "std", feature = "libm")),
+        doc = docs_rs_links!()
+    )]
     NoRealSolution,
     /// A period count was negative or not finite.
     NegativePeriods,
@@ -297,6 +398,10 @@ pub enum TvmError {
     /// infinity). Used for a [`DatedCashflow`]'s year-offset (ADR-0029) and for the
     /// [`continuous`] operations' `years` duration (ADR-0036). The value may be
     /// negative or zero, but must be finite.
+    #[cfg_attr(
+        not(any(feature = "std", feature = "libm")),
+        doc = docs_rs_links!()
+    )]
     NonFiniteOffset,
     /// An operation that requires at least one cashflow was given an empty
     /// series (e.g. [`Cashflows::internal_rate_of_return`]).
@@ -308,6 +413,10 @@ pub enum TvmError {
     /// Returned by [`Cashflows::modified_internal_rate_of_return`] (ADR-0052).
     /// Distinct from [`EmptyCashflows`](Self::EmptyCashflows), where there are no
     /// cashflows at all.
+    #[cfg_attr(
+        not(any(feature = "std", feature = "libm")),
+        doc = docs_rs_links!()
+    )]
     NoOutflows,
     /// [`Cashflows::internal_rate_of_return`] did not converge to a root within
     /// its iteration budget, or the iteration left the valid rate domain.
@@ -317,6 +426,10 @@ pub enum TvmError {
     /// prices the given payment stream at the target value). Distinct from
     /// [`IrrDidNotConverge`](Self::IrrDidNotConverge), which is specific to
     /// [`Cashflows::internal_rate_of_return`].
+    #[cfg_attr(
+        not(any(feature = "std", feature = "libm")),
+        doc = docs_rs_links!()
+    )]
     SolveDidNotConverge,
     /// A perpetuity's present value diverges because its rate does not exceed its
     /// growth rate (`r <= g`; for a level perpetuity, `r <= 0`). The closed form
@@ -324,6 +437,10 @@ pub enum TvmError {
     /// economically meaningless value (`r < g`) for a series that does not
     /// converge, so [`annuity::perpetuity`] / [`annuity::growing_perpetuity`]
     /// reject it instead (ADR-0015).
+    #[cfg_attr(
+        not(any(feature = "std", feature = "libm")),
+        doc = docs_rs_links!()
+    )]
     DivergentPerpetuity,
 }
 
