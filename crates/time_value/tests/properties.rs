@@ -6,13 +6,16 @@
 //! to the plain sum at a zero rate, the internal rate of return zeroes the net
 //! present value, the annuity payment inverts the annuity present value (for both
 //! ordinary and annuity-due), an amortization schedule conserves the principal it
-//! repays, and `Money`'s arithmetic obeys the usual algebraic laws.
+//! repays, currency rounding is idempotent, the dated XNPV agrees with the
+//! periodic NPV on whole-year offsets, and `Money`'s arithmetic obeys the usual
+//! algebraic laws.
 //!
 //! `proptest` is a dev-dependency only, so it never reaches the published
 //! crate's dependency tree (the zero-dependency promise is about distribution,
 //! not test tooling — `docs/adr/0009-no_std-and-optional-libm.md`). The `std`/
-//! `libm`-gated operations (single sum, annuity, `Schedule::for_term`) are tested
-//! only when a transcendental-math feature is on.
+//! `libm`-gated operations (single sum, annuity, `Schedule::for_term`,
+//! `Money::round_to_currency`, `DatedCashflows`) are tested only when a
+//! transcendental-math feature is on.
 
 use proptest::prelude::*;
 use time_value::{amortization::Schedule, Cashflows, Money, Monthly, Rate};
@@ -644,4 +647,180 @@ proptest! {
         let scaled_future = ordinary_future * (1.0 + rate);
         prop_assert!(close(due_future, scaled_future, 1e-9 * scaled_future.abs()));
     }
+
+    /// Rounding to a currency's minor unit is **idempotent**: the result is already
+    /// on the minor-unit grid, so rounding it again changes nothing. Asserted
+    /// exactly, and over every currency in the enum rather than a chosen few —
+    /// `index` selects from [`Currency::ALL`], so the whole closed set is in range
+    /// (ADR-0034, ADR-0045).
+    #[test]
+    fn rounding_to_a_currency_is_idempotent(
+        amount in -1e9f64..1e9,
+        index in 0usize..time_value::Currency::ALL.len(),
+    ) {
+        let money = Money::new(amount, time_value::Currency::ALL[index]).unwrap();
+        let once = money.round_to_currency();
+        prop_assert_eq!(once.round_to_currency(), once);
+    }
+
+    /// Rounding is a *presentation* step, so it never changes what the amount is
+    /// denominated in (ADR-0033/0034) and never moves the magnitude by as much as a
+    /// whole minor unit — at most half of one, since it rounds to the nearest.
+    ///
+    /// The allowance on top of the half-unit is a flat `1e-6`, and it is
+    /// deliberately *absolute* rather than relative to the amount. It has to clear
+    /// the error of scaling by `10^exponent` and back, which peaks around `2e-7` at
+    /// the top of this magnitude range, while staying far below the tightest
+    /// half-unit in the enum — `5e-5`, for the exponent-4 currencies. A relative
+    /// allowance would fail that second test: at a magnitude of `1e9` even
+    /// `1e-9 × amount` is `1.0`, which swamps every half-unit and would let the
+    /// assertion pass no matter what rounding did.
+    ///
+    /// Currencies with no minor unit have no grid and are excluded from the
+    /// distance bound — `a_currency_without_a_minor_unit_is_never_rounded` pins
+    /// those exhaustively instead.
+    #[test]
+    fn rounding_preserves_the_currency_and_moves_by_under_a_minor_unit(
+        amount in -1e9f64..1e9,
+        index in 0usize..time_value::Currency::ALL.len(),
+    ) {
+        let currency = time_value::Currency::ALL[index];
+        let rounded = Money::new(amount, currency).unwrap().round_to_currency();
+        prop_assert_eq!(rounded.currency(), currency);
+
+        if let Some(exponent) = currency.minor_unit_exponent() {
+            let unit = 0.1f64.powi(i32::from(exponent));
+            let moved = (rounded.value() - amount).abs();
+            prop_assert!(moved <= unit / 2.0 + 1e-6);
+        }
+    }
+
+    /// The dated XNPV and the periodic NPV are the same calculation seen two ways:
+    /// place the flows at whole-year offsets `0, 1, 2, …` and discount at an annual
+    /// rate, and `DatedCashflows` must agree with `Cashflows<Annual>` (ADR-0029).
+    ///
+    /// This is the strongest available check on the dated engine, because the two
+    /// share no code — one raises `(1 + r)` to a fractional power per flow, the
+    /// other folds a running factor — so agreement is real corroboration rather
+    /// than a restatement.
+    #[test]
+    fn xnpv_agrees_with_the_periodic_npv_on_whole_year_offsets(
+        amounts in prop::collection::vec(-1e5f64..1e5, 1..=12),
+        rate in -0.5f64..1.0,
+    ) {
+        use time_value::{Annual, DatedCashflow, DatedCashflows};
+
+        let annual = Rate::<Annual>::new(rate).unwrap();
+
+        let periodic: Vec<Money> = amounts.iter().map(|&a| Money::agnostic(a).unwrap()).collect();
+        let periodic_npv = Cashflows::<Annual>::new(&periodic)
+            .net_present_value(annual)
+            .unwrap()
+            .value();
+
+        let dated: Vec<DatedCashflow> = amounts
+            .iter()
+            .enumerate()
+            .map(|(i, &a)| {
+                #[allow(clippy::cast_precision_loss)]
+                let offset = i as f64;
+                DatedCashflow::new(offset, Money::agnostic(a).unwrap()).unwrap()
+            })
+            .collect();
+        let dated_npv = DatedCashflows::new(&dated)
+            .net_present_value(annual)
+            .unwrap()
+            .value();
+
+        // `powf` and the folded factor round differently, so compare relative to
+        // the scale of the flows rather than by a fixed epsilon.
+        let scale: f64 = amounts.iter().map(|a| a.abs()).sum::<f64>().max(1.0);
+        prop_assert!(close(dated_npv, periodic_npv, 1e-9 * scale));
+    }
+
+    /// Only the *gaps* between dated flows matter, not where the timeline starts:
+    /// every flow is discounted by `(1 + r)^(tᵢ − t₀)` against the **first** flow,
+    /// so sliding every offset by the same amount leaves the XNPV unchanged
+    /// (ADR-0029). This generalises the `xirr_is_invariant_to_shifting_the_reference`
+    /// point test from the solver to the valuation itself.
+    #[test]
+    fn xnpv_is_invariant_to_sliding_every_offset(
+        spec in prop::collection::vec((-1e5f64..1e5, 0.0f64..3.0), 1..=10),
+        shift in -50.0f64..50.0,
+        rate in -0.5f64..1.0,
+    ) {
+        use time_value::{Annual, DatedCashflow, DatedCashflows};
+
+        let annual = Rate::<Annual>::new(rate).unwrap();
+        let mut offset = 0.0;
+        let mut base = Vec::new();
+        let mut slid = Vec::new();
+        for (amount, gap) in spec {
+            offset += gap;
+            let money = Money::agnostic(amount).unwrap();
+            base.push(DatedCashflow::new(offset, money).unwrap());
+            slid.push(DatedCashflow::new(offset + shift, money).unwrap());
+        }
+
+        let here = DatedCashflows::new(&base).net_present_value(annual).unwrap().value();
+        let there = DatedCashflows::new(&slid).net_present_value(annual).unwrap().value();
+        // The shifted offsets are differences of larger numbers, so they lose a
+        // little precision before `powf` ever sees them; scale the tolerance.
+        prop_assert!(close(there, here, 1e-6 * here.abs().max(1.0)));
+    }
+
+    /// At a zero rate nothing is discounted however the flows are dated, so the
+    /// XNPV collapses to the arithmetic sum — the dated twin of
+    /// `npv_at_zero_rate_is_the_plain_sum`.
+    #[test]
+    fn xnpv_at_zero_rate_is_the_plain_sum(
+        spec in prop::collection::vec((-1e6f64..1e6, 0.0f64..5.0), 1..=12),
+    ) {
+        use time_value::{Annual, DatedCashflow, DatedCashflows};
+
+        let mut offset = 0.0;
+        let mut flows = Vec::new();
+        let mut sum = 0.0;
+        for (amount, gap) in spec {
+            offset += gap;
+            sum += amount;
+            flows.push(DatedCashflow::new(offset, Money::agnostic(amount).unwrap()).unwrap());
+        }
+
+        let npv = DatedCashflows::new(&flows)
+            .net_present_value(Rate::<Annual>::new(0.0).unwrap())
+            .unwrap()
+            .value();
+        prop_assert!(close(npv, sum, 1e-6));
+    }
+}
+
+/// Every currency without a minor unit is returned unchanged by
+/// [`Money::round_to_currency`] — `Xxx`, the precious metals, and the fund/testing
+/// codes. The domain is a small finite set, so this iterates it exhaustively
+/// rather than sampling (ADR-0045); a currency that gains or loses a minor-unit
+/// exponent fails here.
+#[cfg(any(feature = "std", feature = "libm"))]
+#[test]
+fn a_currency_without_a_minor_unit_is_never_rounded() {
+    use time_value::Currency;
+
+    let mut checked = 0;
+    for &currency in Currency::ALL {
+        if currency.minor_unit_exponent().is_some() {
+            continue;
+        }
+        checked += 1;
+        for magnitude in [0.0, 1234.5678, -0.999, 1e9 + 0.5] {
+            let money = Money::new(magnitude, currency).unwrap();
+            assert_eq!(
+                money.round_to_currency(),
+                money,
+                "{currency:?} has no minor unit, so rounding must be the identity",
+            );
+        }
+    }
+    // The set is non-empty — `Xxx` alone guarantees it — so a filter that silently
+    // matched nothing would not pass as a vacuous success.
+    assert!(checked > 0, "no minor-unit-free currency found");
 }
