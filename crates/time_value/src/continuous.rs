@@ -44,7 +44,10 @@ use crate::{Annual, Money, Rate, TvmError};
 ///
 /// The value is the plain force of interest: `0.05` is a 5% continuously
 /// compounded annual rate.
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+///
+/// Forces of interest are **totally ordered** by that value — see the [`Ord`] impl
+/// (`docs/adr/0059-the-finite-scalars-are-totally-ordered.md`).
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ContinuousRate(f64);
 
 impl ContinuousRate {
@@ -138,6 +141,47 @@ impl TryFrom<f64> for ContinuousRate {
         Self::new(force)
     }
 }
+
+/// Orders forces of interest by their value.
+///
+/// The order is **total**, not partial: a `ContinuousRate` is finite by
+/// construction, so `NaN` is unrepresentable. There is no periodicity tag to keep
+/// apart here — a force of interest is periodicity-free (ADR-0036) — so any two are
+/// comparable (ADR-0059).
+///
+/// ```
+/// use time_value::ContinuousRate;
+///
+/// let quoted = ContinuousRate::new(0.05)?;
+/// let floor = ContinuousRate::new(0.02)?;
+///
+/// assert!(quoted > floor);
+/// assert_eq!(quoted.max(floor), quoted);
+/// # Ok::<(), time_value::TvmError>(())
+/// ```
+impl Ord for ContinuousRate {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        // Unreachable fallback: `new` rejects the non-finite values, and two finite
+        // `f64`s always compare.
+        self.0
+            .partial_cmp(&other.0)
+            .unwrap_or(core::cmp::Ordering::Equal)
+    }
+}
+
+/// Delegates to the total order on [`Ord`], so it never returns `None`.
+impl PartialOrd for ContinuousRate {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+/// Equality on a force of interest is a full equivalence relation — `NaN`, the only
+/// value that could break reflexivity, is unrepresentable. `PartialEq` stays derived
+/// (there is no type parameter to drag a bound onto, unlike [`Rate`]), and there is
+/// deliberately no [`Hash`](core::hash::Hash), for the reason given on [`Rate`]
+/// (ADR-0059).
+impl Eq for ContinuousRate {}
 
 impl core::fmt::Display for ContinuousRate {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -307,5 +351,38 @@ mod tests {
             ContinuousRate::try_from(f64::NAN),
             Err(TvmError::NonFiniteRate)
         );
+    }
+
+    /// A force of interest carries no periodicity tag, so *every* pair is comparable
+    /// — including one below `−1`, which `new` accepts (ADR-0059).
+    #[test]
+    fn forces_of_interest_are_totally_ordered() {
+        let quoted = ContinuousRate::new(0.05).unwrap();
+        let floor = ContinuousRate::new(0.02).unwrap();
+        let decaying = ContinuousRate::new(-2.0).unwrap();
+        let same_floor = ContinuousRate::new(0.02).unwrap();
+
+        assert!(quoted > floor);
+        assert!(decaying < floor);
+        assert!(floor >= same_floor);
+        assert_eq!(quoted.max(floor), quoted);
+        assert_eq!(quoted.min(decaying), decaying);
+        assert_eq!(quoted.partial_cmp(&floor), Some(quoted.cmp(&floor)));
+
+        let mut forces = [quoted, decaying, floor];
+        forces.sort_unstable();
+        assert!(approx(forces[0].value(), -2.0));
+        assert!(approx(forces[2].value(), 0.05));
+    }
+
+    /// The derived `PartialEq` and the hand-written `cmp` must agree, and the signed
+    /// zeros are the pair that could split them.
+    #[test]
+    fn the_signed_zeros_are_one_force() {
+        let plus = ContinuousRate::new(0.0).unwrap();
+        let minus = ContinuousRate::new(-0.0).unwrap();
+
+        assert_eq!(plus, minus);
+        assert_eq!(plus.cmp(&minus), core::cmp::Ordering::Equal);
     }
 }

@@ -7,8 +7,9 @@
 //! present value, the annuity payment inverts the annuity present value (for both
 //! ordinary and annuity-due), an amortization schedule conserves the principal it
 //! repays, currency rounding is idempotent, the dated XNPV agrees with the
-//! periodic NPV on whole-year offsets, and `Money`'s arithmetic obeys the usual
-//! algebraic laws.
+//! periodic NPV on whole-year offsets, `Money`'s arithmetic obeys the usual
+//! algebraic laws, and the finite scalars' ordering is the ordering of the value
+//! they wrap.
 //!
 //! `proptest` is a dev-dependency only, so it never reaches the published
 //! crate's dependency tree (the zero-dependency promise is about distribution,
@@ -303,6 +304,101 @@ proptest! {
             prop_assert!(installment.balance().value() < previous);
             previous = installment.balance().value();
         }
+    }
+
+    /// A `Rate<P>`'s ordering *is* the ordering of its per-period value — that is the
+    /// whole claim behind giving it `Ord` (ADR-0059), so it is asserted over the
+    /// domain rather than at a handful of points. `PartialOrd` is pinned to agree
+    /// with `Ord` in the same breath: the order is total, so it never answers `None`.
+    #[test]
+    fn rate_ordering_agrees_with_the_per_period_value(
+        a in -0.999f64..1e9,
+        b in -0.999f64..1e9,
+    ) {
+        let (x, y) = (Rate::<Monthly>::new(a).unwrap(), Rate::<Monthly>::new(b).unwrap());
+
+        prop_assert_eq!(x.cmp(&y), a.partial_cmp(&b).unwrap());
+        prop_assert_eq!(x.partial_cmp(&y), Some(x.cmp(&y)));
+        prop_assert_eq!(x > y, a > b);
+        // Equality is spelled through `partial_cmp` rather than `a == b`: the crate
+        // denies `clippy::float_cmp`, and this says the same thing.
+        prop_assert_eq!(x == y, a.partial_cmp(&b).unwrap().is_eq());
+    }
+
+    /// The laws `Eq` and `Ord` promise, over three arbitrary rates: the comparison is
+    /// *total* (exactly one of the three outcomes holds), antisymmetric, and
+    /// transitive. These are the obligations that make deriving `Eq`/`Ord` on a float
+    /// newtype sound only because the constructor rejects `NaN`, so they are the
+    /// assumption worth pinning.
+    #[test]
+    fn rate_ordering_obeys_the_total_order_laws(
+        a in -0.999f64..1e9,
+        b in -0.999f64..1e9,
+        c in -0.999f64..1e9,
+    ) {
+        use core::cmp::Ordering;
+
+        let x = Rate::<Monthly>::new(a).unwrap();
+        let y = Rate::<Monthly>::new(b).unwrap();
+        let z = Rate::<Monthly>::new(c).unwrap();
+        // A second, separately-constructed copy, so the reflexivity assertions below
+        // are not comparing one expression with itself.
+        let x_again = Rate::<Monthly>::new(a).unwrap();
+
+        // Reflexive — the law a float newtype could only fail through `NaN`.
+        prop_assert_eq!(x.cmp(&x_again), Ordering::Equal);
+        prop_assert!(x == x_again);
+
+        // Total: exactly one of less / equal / greater.
+        prop_assert_eq!(u8::from(x < y) + u8::from(x == y) + u8::from(x > y), 1);
+
+        // Antisymmetric, and `cmp` is its own reverse.
+        prop_assert_eq!(x.cmp(&y), y.cmp(&x).reverse());
+
+        // Transitive.
+        if x <= y && y <= z {
+            prop_assert!(x <= z);
+        }
+    }
+}
+
+#[cfg(any(feature = "std", feature = "libm"))]
+proptest! {
+    /// `Period<P>`'s ordering is the ordering of its count, for the same reason as
+    /// `Rate`'s (ADR-0059) — and this is a comparison that did not compile before,
+    /// because the derived `PartialOrd` it replaces carried an unsatisfiable
+    /// `P: PartialOrd` bound.
+    #[test]
+    fn period_ordering_agrees_with_the_count(
+        a in 0.0f64..1e9,
+        b in 0.0f64..1e9,
+    ) {
+        use time_value::Period;
+
+        let (x, y) = (Period::<Monthly>::new(a).unwrap(), Period::<Monthly>::new(b).unwrap());
+
+        prop_assert_eq!(x.cmp(&y), a.partial_cmp(&b).unwrap());
+        prop_assert_eq!(x.partial_cmp(&y), Some(x.cmp(&y)));
+        prop_assert_eq!(x < y, a < b);
+        prop_assert_eq!(x == y, a.partial_cmp(&b).unwrap().is_eq());
+    }
+
+    /// `ContinuousRate`'s ordering is the ordering of its force of interest. Its
+    /// domain is every finite `f64`, including values at or below `−1` that a
+    /// per-period `Rate` cannot hold (ADR-0036), so the generator spans the sign.
+    #[test]
+    fn continuous_rate_ordering_agrees_with_the_force(
+        a in -1e9f64..1e9,
+        b in -1e9f64..1e9,
+    ) {
+        use time_value::ContinuousRate;
+
+        let (x, y) = (ContinuousRate::new(a).unwrap(), ContinuousRate::new(b).unwrap());
+
+        prop_assert_eq!(x.cmp(&y), a.partial_cmp(&b).unwrap());
+        prop_assert_eq!(x.partial_cmp(&y), Some(x.cmp(&y)));
+        prop_assert_eq!(x > y, a > b);
+        prop_assert_eq!(x == y, a.partial_cmp(&b).unwrap().is_eq());
     }
 }
 

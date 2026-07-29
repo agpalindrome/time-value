@@ -1,5 +1,6 @@
 //! [`Rate`] — a periodicity-tagged interest rate.
 
+use core::cmp::Ordering;
 use core::fmt;
 use core::marker::PhantomData;
 
@@ -18,7 +19,11 @@ use crate::{Periodicity, TvmError};
 /// or below that are economically meaningless for discounting and compounding.
 ///
 /// The value is the plain per-period rate: `0.01` is 1% per period.
-#[derive(Clone, Copy, PartialEq)]
+///
+/// Rates of the same periodicity are **totally ordered** by their per-period
+/// value, so a solved rate can be compared with a threshold directly — see the
+/// [`Ord`] impl (`docs/adr/0059-the-finite-scalars-are-totally-ordered.md`).
+#[derive(Clone, Copy)]
 pub struct Rate<P: Periodicity> {
     per_period: f64,
     marker: PhantomData<P>,
@@ -224,9 +229,79 @@ impl<P: Periodicity> TryFrom<f64> for Rate<P> {
     }
 }
 
+/// Orders rates of the same periodicity by their per-period value.
+///
+/// The order is **total**, not partial: a `Rate` is finite by construction, so
+/// `NaN` — the one `f64` that has no place in an ordering — is unrepresentable.
+/// Comparing rates of *different* periodicities does not compile, so `Ord` never
+/// crosses clocks (ADR-0059).
+///
+/// ```
+/// use time_value::{Monthly, Rate};
+///
+/// let irr = Rate::<Monthly>::new(0.012)?;
+/// let hurdle = Rate::<Monthly>::new(0.010)?;
+///
+/// assert!(irr > hurdle);
+/// assert_eq!(irr.max(hurdle), irr);
+/// assert_eq!(hurdle.clamp(Rate::ZERO, irr), hurdle);
+/// # Ok::<(), time_value::TvmError>(())
+/// ```
+///
+/// A monthly rate cannot be compared with an annual one — the periodicity tag
+/// rejects it at compile time, exactly as it does for the arithmetic operations:
+///
+/// ```compile_fail
+/// use time_value::{Annual, Monthly, Rate};
+///
+/// let monthly = Rate::<Monthly>::new(0.01).unwrap();
+/// let annual = Rate::<Annual>::new(0.12).unwrap();
+/// let _ = monthly > annual; // different periodicities — won't compile
+/// ```
+impl<P: Periodicity> Ord for Rate<P> {
+    fn cmp(&self, other: &Self) -> Ordering {
+        // Two finite `f64`s always compare, so the fallback is unreachable: every
+        // constructor rejects the non-finite values. `unwrap_or` rather than an
+        // `expect` keeps the impl panic-free by construction.
+        self.per_period
+            .partial_cmp(&other.per_period)
+            .unwrap_or(Ordering::Equal)
+    }
+}
+
+/// Delegates to the total order on [`Ord`], so it never returns `None`.
+impl<P: Periodicity> PartialOrd for Rate<P> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+/// Two rates of the same periodicity are equal exactly when their per-period
+/// values are — `+0.0` and `-0.0` included, as [`f64`] has it.
+///
+/// Hand-written rather than derived: a derived `PartialEq` would carry a
+/// `P: PartialEq` bound, which the periodicity markers happen to satisfy but which
+/// is not part of the [`Periodicity`] contract and blocks [`Ord`] (whose `Eq`
+/// supertrait would inherit it). Routing equality through [`cmp`](Ord::cmp) also
+/// keeps `clippy::float_cmp` satisfied without an allow: there is no `==` on
+/// floats here.
+impl<P: Periodicity> PartialEq for Rate<P> {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other).is_eq()
+    }
+}
+
+/// Equality on rates is a full equivalence relation: reflexivity is the only law a
+/// float newtype can fail, and it cannot fail here because `NaN` is unrepresentable
+/// (ADR-0059).
+///
+/// Deliberately **not** accompanied by [`Hash`](core::hash::Hash): `+0.0 == -0.0`
+/// while their bit patterns differ, so a correct `Hash` would have to normalise the
+/// zero, and nothing needs a hashed rate.
+impl<P: Periodicity> Eq for Rate<P> {}
+
 // `Debug`/`Display` are hand-written so the periodicity shows as its name rather
-// than a `PhantomData`. `Clone`/`Copy`/`PartialEq` are derived (a derived
-// `PartialEq` is exempt from `clippy::float_cmp`, unlike a hand-written one).
+// than a `PhantomData`.
 impl<P: Periodicity> fmt::Debug for Rate<P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Rate")
@@ -311,6 +386,69 @@ mod tests {
         );
         let r: Rate<Monthly> = 0.02.try_into().unwrap();
         assert_eq!(r.value(), 0.02);
+    }
+
+    /// The headline ergonomic the ordering exists for (issue #103): a solved rate
+    /// compared with a threshold, without unwrapping to `f64` and losing the tag.
+    #[test]
+    fn a_rate_compares_with_a_threshold() {
+        let irr = Rate::<Monthly>::new(0.012).unwrap();
+        let hurdle = Rate::<Monthly>::new(0.010).unwrap();
+
+        let same_irr = Rate::<Monthly>::new(0.012).unwrap();
+        assert!(irr > hurdle);
+        assert!(hurdle < irr);
+        assert!(irr >= same_irr);
+        assert!(irr <= same_irr);
+        assert_eq!(irr.max(hurdle), irr);
+        assert_eq!(irr.min(hurdle), hurdle);
+        assert_eq!(irr.clamp(Rate::ZERO, hurdle), hurdle);
+        assert!(Rate::<Monthly>::new(-0.5).unwrap() < Rate::ZERO);
+    }
+
+    /// `Ord` and `PartialOrd` are two views of one comparison, so they must agree —
+    /// and `PartialOrd` never declines to answer, because the order is total.
+    #[test]
+    fn cmp_agrees_with_partial_cmp() {
+        let values = [-0.9, -0.5, 0.0, 0.01, 1.0, 1e9];
+        for &a in &values {
+            for &b in &values {
+                let (x, y) = (
+                    Rate::<Monthly>::new(a).unwrap(),
+                    Rate::<Monthly>::new(b).unwrap(),
+                );
+                assert_eq!(x.partial_cmp(&y), Some(x.cmp(&y)));
+                assert_eq!(x.cmp(&y), a.partial_cmp(&b).unwrap());
+            }
+        }
+    }
+
+    /// `Ord` unlocks the slice sorts; the ordering must be the numeric one.
+    #[test]
+    fn rates_sort_by_value() {
+        let mut rates = [
+            Rate::<Monthly>::new(0.02).unwrap(),
+            Rate::<Monthly>::new(-0.5).unwrap(),
+            Rate::<Monthly>::new(0.01).unwrap(),
+        ];
+        rates.sort_unstable();
+        assert_eq!(rates[0].value(), -0.5);
+        assert_eq!(rates[1].value(), 0.01);
+        assert_eq!(rates[2].value(), 0.02);
+    }
+
+    /// `Eq` promises equality is reflexive, and `Ord` promises `cmp` returns `Equal`
+    /// exactly when `eq` is true. The one `f64` pair that could break the pairing is
+    /// the signed zeros — equal as numbers, different in their bits — so pin it.
+    #[test]
+    fn the_signed_zeros_are_one_rate() {
+        let plus = Rate::<Monthly>::new(0.0).unwrap();
+        let minus = Rate::<Monthly>::new(-0.0).unwrap();
+
+        let minus_again = Rate::<Monthly>::new(-0.0).unwrap();
+        assert_eq!(plus, minus);
+        assert_eq!(plus.cmp(&minus), core::cmp::Ordering::Equal);
+        assert_eq!(minus, minus_again); // reflexivity, the law `Eq` adds
     }
 
     #[cfg(any(feature = "std", feature = "libm"))]
