@@ -567,10 +567,12 @@ pub fn periods_from_future<P: Periodicity>(
 ///
 /// # Errors
 ///
-/// [`TvmError::SolveDidNotConverge`] if no rate prices the payment stream at
-/// `present` (e.g. incompatible signs), or [`TvmError::RateOutOfRange`] /
-/// [`TvmError::Overflow`] if the located root is outside the valid rate
-/// domain or non-finite.
+/// - [`TvmError::ZeroPeriods`] if `periods` is zero: the annuity factor is then
+///   `0` whatever the rate, so the equation constrains nothing (ADR-0056).
+/// - [`TvmError::SolveDidNotConverge`] if no rate prices the payment stream at
+///   `present` (e.g. incompatible signs).
+/// - [`TvmError::RateOutOfRange`] / [`TvmError::Overflow`] if the located root is
+///   outside the valid rate domain or non-finite.
 pub fn rate<P: Periodicity>(
     periods: Period<P>,
     payment: Payment,
@@ -609,12 +611,48 @@ pub fn rate<P: Periodicity>(
 ///
 /// # Errors
 ///
-/// As [`rate`].
+/// As [`rate`], plus the single-period degeneracy: over one period the
+/// future-value factor is exactly `1` for every rate, so the equation reduces to
+/// `PMT = FV` with the rate absent. [`TvmError::IndeterminateRate`] if the two are
+/// equal (every rate satisfies it), [`TvmError::NoRealSolution`] if they differ
+/// (none does) — ADR-0056.
 pub fn rate_from_future<P: Periodicity>(
     periods: Period<P>,
     payment: Payment,
     future: FutureValue,
 ) -> Result<Rate<P>, TvmError> {
+    // Over a single period the future-value factor is exactly `1` for every rate —
+    // the one payment falls at the end of the term and is never compounded — so the
+    // equation reduces to `PMT = FV` with `r` absent. Either every rate satisfies it
+    // or none does, and which it is turns on that comparison alone. Without this
+    // guard the bracketing scan finds its very first probe to be a root and returns
+    // that arbitrary sentinel, `−0.9999` (ADR-0056).
+    //
+    // `n = 1` is the only such case: `((1+r)ⁿ − 1)/r` is constant in `r` at `n = 0`
+    // (handled in `solve_rate`) and at `n = 1`, and at no larger `n`.
+    //
+    // "Equal" here is the solver's own root test, not `==`. A target a hair away
+    // from the payment still leaves a residual inside the accepted tolerance at
+    // every rate, so exact equality would let those near-misses keep leaking the
+    // sentinel. Reusing `Residual::is_root` means this guard and the solver cannot
+    // disagree about what counts as satisfied.
+    //
+    // The term test is exact — `n = 1` is an identity, not a neighbourhood — and is
+    // written against zero because that is the form the crate's `float_cmp` lint
+    // permits; `n - 1.0 == 0.0` holds for exactly the finite `n` where `n == 1.0`.
+    if periods.value() - 1.0 == 0.0 {
+        let priced = payment.money().value(); // the factor is exactly 1
+        let target = future.money().value();
+        let residual = Residual {
+            value: priced - target,
+            scale: abs(priced) + abs(target),
+        };
+        return Err(if residual.is_root() {
+            TvmError::IndeterminateRate
+        } else {
+            TvmError::NoRealSolution
+        });
+    }
     solve_rate(
         periods.value(),
         payment.money().value(),
@@ -642,6 +680,13 @@ fn solve_rate<P: Periodicity>(
     target: f64,
     factor: impl Fn(f64, f64) -> f64,
 ) -> Result<Rate<P>, TvmError> {
+    // Over a zero term both factors are identically `0`, so the priced value is `0`
+    // whatever the rate: the equation says nothing about `r`. `payment` already
+    // rejects a zero term as `ZeroPeriods`; the solves said `SolveDidNotConverge`,
+    // which blamed the iteration for a degenerate input (ADR-0056).
+    if periods == 0.0 {
+        return Err(TvmError::ZeroPeriods);
+    }
     let residual = |r: f64| {
         let priced = payment * factor(r, periods);
         Residual {
@@ -1292,6 +1337,102 @@ mod tests {
             ),
             Err(TvmError::SolveDidNotConverge)
         );
+    }
+
+    /// A degenerate rate solve must never hand back the bracketing scan's starting
+    /// sentinel (`−0.9999`) as if it were the answer (ADR-0056).
+    mod degenerate_rate_solves {
+        use super::*;
+
+        /// Over one period the future-value factor is `1` for every rate, so when
+        /// the target equals the payment every rate satisfies the equation. This is
+        /// the case that used to return `Ok(-0.9999)`.
+        #[test]
+        fn a_single_period_future_solve_is_indeterminate_when_the_target_matches() {
+            assert_eq!(
+                annuity::rate_from_future::<Monthly>(
+                    Period::new(1.0).unwrap(),
+                    Payment(Money::agnostic(100.0).unwrap()),
+                    FutureValue(Money::agnostic(100.0).unwrap()),
+                ),
+                Err(TvmError::IndeterminateRate)
+            );
+        }
+
+        /// The target need not match the payment *exactly* to be satisfied by every
+        /// rate — a difference inside the solver's tolerance leaves the residual a
+        /// root at every rate just the same. An exact `==` guard would have let this
+        /// one keep returning the sentinel, so the check reuses the solver's own
+        /// root test.
+        #[test]
+        fn a_single_period_future_solve_is_indeterminate_within_the_root_tolerance() {
+            assert_eq!(
+                annuity::rate_from_future::<Monthly>(
+                    Period::new(1.0).unwrap(),
+                    Payment(Money::agnostic(100.0).unwrap()),
+                    // 1e-13 adrift: far inside 1e-9 × (100 + 100).
+                    FutureValue(Money::agnostic(100.000_000_000_000_1).unwrap()),
+                ),
+                Err(TvmError::IndeterminateRate)
+            );
+        }
+
+        /// The same factor with a target the payment cannot reach: no rate works,
+        /// which is the opposite failure and a different variant.
+        #[test]
+        fn a_single_period_future_solve_has_no_solution_when_the_target_differs() {
+            assert_eq!(
+                annuity::rate_from_future::<Monthly>(
+                    Period::new(1.0).unwrap(),
+                    Payment(Money::agnostic(100.0).unwrap()),
+                    FutureValue(Money::agnostic(150.0).unwrap()),
+                ),
+                Err(TvmError::NoRealSolution)
+            );
+        }
+
+        /// A zero term makes both factors identically zero, so the equation
+        /// constrains nothing. `annuity::payment` already reports `ZeroPeriods`;
+        /// the solves now agree instead of blaming the iteration.
+        #[test]
+        fn a_zero_term_is_zero_periods_in_both_solves() {
+            for result in [
+                annuity::rate::<Monthly>(
+                    Period::ZERO,
+                    Payment(Money::agnostic(500.0).unwrap()),
+                    PresentValue(Money::ZERO),
+                ),
+                annuity::rate_from_future::<Monthly>(
+                    Period::ZERO,
+                    Payment(Money::agnostic(500.0).unwrap()),
+                    FutureValue(Money::ZERO),
+                ),
+            ] {
+                assert_eq!(result, Err(TvmError::ZeroPeriods));
+            }
+        }
+
+        /// The guards must not swallow well-posed solves: two periods is the first
+        /// term at which the future-value factor actually varies with the rate.
+        ///
+        /// The tolerance is derived, not chosen. A root is accepted when the
+        /// residual is within `1e-9` of the scale `|priced| + |target| ≈ 410`, i.e.
+        /// `4.1e-7`; the factor `(2 + r)` moves the priced value by `100` per unit
+        /// of rate, so the rate itself is pinned only to about `4.1e-9`. The
+        /// observed error is `1.9e-9`, comfortably inside that.
+        #[test]
+        fn a_two_period_future_solve_still_resolves() {
+            let periods = Period::new(2.0).unwrap();
+            let payment = Money::agnostic(100.0).unwrap();
+            let future = annuity::future_value(rate(0.05), periods, payment).unwrap();
+            let recovered = annuity::rate_from_future::<Monthly>(
+                periods,
+                Payment(payment),
+                FutureValue(future),
+            )
+            .unwrap();
+            assert!(approx(recovered.value(), 0.05, 1e-8));
+        }
     }
 
     /// The growing annuity (ADR-0048). The closed forms are checked against a

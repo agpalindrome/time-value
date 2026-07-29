@@ -59,7 +59,7 @@ impl Residual {
     /// A non-finite scale would make the tolerance infinite — accepting
     /// everything — so it is rejected outright. A `NaN` value fails
     /// [`within`](self::within) and so is never a root.
-    fn is_root(self) -> bool {
+    pub(crate) fn is_root(self) -> bool {
         /// Residual magnitude, as a fraction of the scale, below which a sample
         /// counts as a root.
         const RELATIVE: f64 = 1e-9;
