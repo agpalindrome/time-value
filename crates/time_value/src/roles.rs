@@ -38,7 +38,7 @@
 //!     Payment(Money::agnostic(500.0)?),
 //!     Principal(Money::agnostic(1000.0)?),
 //! )?;
-//! assert!((schedule.next().unwrap().interest.value() - 100.0).abs() < 1e-9);
+//! assert!((schedule.next().unwrap().interest().value() - 100.0).abs() < 1e-9);
 //! # Ok::<(), time_value::TvmError>(())
 //! ```
 //!

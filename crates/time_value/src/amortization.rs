@@ -22,21 +22,91 @@ use crate::{Currency, Money, Payment, Periodicity, Principal, Rate, TvmError};
 /// balance for one more.
 const FINAL_INSTALLMENT_SLACK: f64 = 1e-9;
 
-/// One period's entry in an amortization [`Schedule`].
+/// One period's entry in an amortization [`Schedule`], read through its
+/// accessors.
+///
+/// The fields are **not public** (ADR-0051): an `Installment` is *yielded* by an
+/// iterator, so public fields would let downstream code construct it by literal
+/// and match it exhaustively, freezing the field set for the life of the major
+/// version. Reading goes through [`period`](Self::period),
+/// [`payment`](Self::payment), [`interest`](Self::interest),
+/// [`principal`](Self::principal) and [`balance`](Self::balance), which leaves
+/// room to add a row later.
+///
+/// ```
+/// use time_value::{amortization::Schedule, Money, Monthly, Payment, Principal, Rate};
+///
+/// let first = Schedule::with_payment(
+///     Rate::<Monthly>::new(0.10)?,
+///     Payment(Money::agnostic(500.0)?),
+///     Principal(Money::agnostic(1000.0)?),
+/// )?
+/// .next()
+/// .unwrap();
+///
+/// assert_eq!(first.period(), 1);
+/// assert_eq!(first.interest().value() + first.principal().value(), first.payment().value());
+/// # Ok::<(), time_value::TvmError>(())
+/// ```
+///
+/// Building one by struct literal does not compile:
+///
+/// ```compile_fail
+/// use time_value::{Installment, Money};
+///
+/// let _ = Installment {
+///     period: 1,
+///     payment: Money::agnostic(500.0).unwrap(),
+///     interest: Money::agnostic(100.0).unwrap(),
+///     principal: Money::agnostic(400.0).unwrap(),
+///     balance: Money::agnostic(600.0).unwrap(),
+/// };
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Installment {
+    // `pub(crate)`, not module-private: `serde_impls` builds one field-by-field
+    // from the wire form. A `pub(crate) fn new` would take four positional
+    // `Money`s — the transposition ADR-0050 exists to prevent — so the two
+    // in-crate construction sites name their fields instead (ADR-0051).
+    pub(crate) period: u32,
+    pub(crate) payment: Money,
+    pub(crate) interest: Money,
+    pub(crate) principal: Money,
+    pub(crate) balance: Money,
+}
+
+impl Installment {
     /// The 1-based period index.
-    pub period: u32,
+    #[must_use]
+    pub const fn period(self) -> u32 {
+        self.period
+    }
+
     /// The amount paid this period — the level payment, or the smaller final
     /// installment that clears the balance.
-    pub payment: Money,
-    /// The portion of `payment` covering interest on the opening balance
+    #[must_use]
+    pub const fn payment(self) -> Money {
+        self.payment
+    }
+
+    /// The portion of the payment covering interest on the opening balance
     /// (negative if the rate is negative).
-    pub interest: Money,
-    /// The portion of `payment` that reduces the balance.
-    pub principal: Money,
+    #[must_use]
+    pub const fn interest(self) -> Money {
+        self.interest
+    }
+
+    /// The portion of the payment that reduces the balance.
+    #[must_use]
+    pub const fn principal(self) -> Money {
+        self.principal
+    }
+
     /// The balance remaining after this payment (zero on the final installment).
-    pub balance: Money,
+    #[must_use]
+    pub const fn balance(self) -> Money {
+        self.balance
+    }
 }
 
 /// A lazy amortization schedule: an [`Iterator`] that repays a balance at a fixed
@@ -81,10 +151,10 @@ impl<P: Periodicity> Schedule<P> {
     /// )?;
     ///
     /// let first = schedule.next().unwrap();
-    /// assert_eq!(first.period, 1);
-    /// assert!((first.interest.value() - 100.0).abs() < 1e-9); // 1000 × 10%
-    /// assert!((first.principal.value() - 400.0).abs() < 1e-9); // 500 − 100
-    /// assert!((first.balance.value() - 600.0).abs() < 1e-9);
+    /// assert_eq!(first.period(), 1);
+    /// assert!((first.interest().value() - 100.0).abs() < 1e-9); // 1000 × 10%
+    /// assert!((first.principal().value() - 400.0).abs() < 1e-9); // 500 − 100
+    /// assert!((first.balance().value() - 600.0).abs() < 1e-9);
     /// # Ok::<(), time_value::TvmError>(())
     /// ```
     ///
@@ -222,22 +292,22 @@ mod tests {
         .unwrap();
 
         let first = schedule.next().unwrap();
-        assert_eq!(first.period, 1);
-        assert!(approx(first.interest.value(), 100.0, 1e-9));
-        assert!(approx(first.principal.value(), 400.0, 1e-9));
-        assert!(approx(first.balance.value(), 600.0, 1e-9));
+        assert_eq!(first.period(), 1);
+        assert!(approx(first.interest().value(), 100.0, 1e-9));
+        assert!(approx(first.principal().value(), 400.0, 1e-9));
+        assert!(approx(first.balance().value(), 600.0, 1e-9));
 
         let second = schedule.next().unwrap();
-        assert_eq!(second.period, 2);
-        assert!(approx(second.interest.value(), 60.0, 1e-9));
-        assert!(approx(second.principal.value(), 440.0, 1e-9));
-        assert!(approx(second.balance.value(), 160.0, 1e-9));
+        assert_eq!(second.period(), 2);
+        assert!(approx(second.interest().value(), 60.0, 1e-9));
+        assert!(approx(second.principal().value(), 440.0, 1e-9));
+        assert!(approx(second.balance().value(), 160.0, 1e-9));
 
         let last = schedule.next().unwrap();
-        assert_eq!(last.period, 3);
-        assert!(approx(last.interest.value(), 16.0, 1e-9));
-        assert!(approx(last.payment.value(), 176.0, 1e-9)); // the stub clears it
-        assert!(approx(last.balance.value(), 0.0, 1e-9));
+        assert_eq!(last.period(), 3);
+        assert!(approx(last.interest().value(), 16.0, 1e-9));
+        assert!(approx(last.payment().value(), 176.0, 1e-9)); // the stub clears it
+        assert!(approx(last.balance().value(), 0.0, 1e-9));
 
         assert!(schedule.next().is_none());
     }
@@ -252,8 +322,8 @@ mod tests {
         .unwrap();
         for installment in schedule {
             assert!(approx(
-                installment.interest.value() + installment.principal.value(),
-                installment.payment.value(),
+                installment.interest().value() + installment.principal().value(),
+                installment.payment().value(),
                 1e-9,
             ));
         }
@@ -300,8 +370,8 @@ mod tests {
             let mut final_balance = f64::NAN;
             for installment in schedule {
                 count += 1;
-                principal_repaid += installment.principal.value();
-                final_balance = installment.balance.value();
+                principal_repaid += installment.principal().value();
+                final_balance = installment.balance().value();
             }
             assert_eq!(count, 12);
             // The principal portions sum back to the original balance...
