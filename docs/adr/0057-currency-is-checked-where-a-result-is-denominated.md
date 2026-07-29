@@ -75,7 +75,11 @@ operation is pinned to agree with its magnitude-only twin on a series its
   it, and it costs one call.
 - `Cashflows::currency` and `DatedCashflows::currency` stay private: they exist to
   serve the denominated operations, and exposing them is a separate question
-  (issue #104).
+  (issue #104). **[Corrected 2026-07-29, closing #104: both are now `pub`, joined by
+  forwarding accessors on `OwnedCashflows` and `Schedule`. This ADR's decision — where
+  the fold belongs, and that the rate solves do not run it — is unchanged; only the
+  visibility is, so the workaround the `# Currency` sections point at is now a call
+  rather than a reimplementation.]**
 - The cost is accepted, not hidden: `npv` and `irr` disagree about whether a mixed
   series is well-formed, and the docs say so in the place a caller reading `irr`
   will see it.

@@ -122,11 +122,31 @@ impl<'a> DatedCashflows<'a> {
     /// the [`Currency::Xxx`](crate::Currency::Xxx) identity rule. An empty (or
     /// wholly agnostic) series is `Xxx`.
     ///
+    /// The dated counterpart of [`Cashflows::currency`](crate::Cashflows::currency),
+    /// with the same purpose: it is the fold
+    /// [`net_present_value`](Self::net_present_value) runs for itself, exposed so a
+    /// caller can learn the denomination — or reject a malformed series — without
+    /// paying for the XNPV. It is likewise the strict reading ADR-0057 points a
+    /// caller of [`internal_rate_of_return`](Self::internal_rate_of_return) at,
+    /// since the rate solves do not fold the currencies.
+    ///
+    /// ```
+    /// use time_value::{Currency, DatedCashflow, DatedCashflows, Money};
+    ///
+    /// let flows = [
+    ///     DatedCashflow::new(0.0, Money::agnostic(-100.0)?)?,
+    ///     DatedCashflow::new(1.0, Money::new(110.0, Currency::Jpy)?)?,
+    /// ];
+    /// assert_eq!(DatedCashflows::new(&flows).currency()?, Currency::Jpy);
+    /// # Ok::<(), time_value::TvmError>(())
+    /// ```
+    ///
     /// # Errors
     ///
     /// [`TvmError::CurrencyMismatch`] if the flows mix distinct non-`Xxx`
-    /// currencies (ADR-0034).
-    fn currency(self) -> Result<crate::Currency, TvmError> {
+    /// currencies (ADR-0034). The fold stops at the first clash, so `left` is what
+    /// had accumulated and `right` is the flow that broke it.
+    pub fn currency(self) -> Result<crate::Currency, TvmError> {
         let mut acc = crate::Currency::Xxx;
         for cf in self.flows {
             acc = combine(acc, cf.amount.currency())?;
@@ -173,7 +193,8 @@ impl<'a> DatedCashflows<'a> {
     /// [`Cashflows::internal_rate_of_return_from`](crate::Cashflows::internal_rate_of_return_from):
     /// the result is a rate, not a [`Money`], so it has no denomination to derive.
     /// A series [`net_present_value`](Self::net_present_value) rejects still has an
-    /// XIRR.
+    /// XIRR. Call [`currency`](Self::currency) first if a mixed series should be an
+    /// error at your call site.
     ///
     /// # Errors
     ///
@@ -416,13 +437,16 @@ mod tests {
             DatedCashflow::new(0.0, Money::new(-100.0, Currency::Usd).unwrap()).unwrap(),
             DatedCashflow::new(1.0, Money::new(110.0, Currency::Eur).unwrap()).unwrap(),
         ];
+        let expected = TvmError::CurrencyMismatch {
+            left: Currency::Usd,
+            right: Currency::Eur,
+        };
         assert_eq!(
             DatedCashflows::new(&flows).net_present_value(annual(0.10)),
-            Err(TvmError::CurrencyMismatch {
-                left: Currency::Usd,
-                right: Currency::Eur,
-            })
+            Err(expected.clone())
         );
+        // …and directly, through the accessor the fold lives in (issue #104).
+        assert_eq!(DatedCashflows::new(&flows).currency(), Err(expected));
     }
 
     /// ADR-0034's identity rule over a dated series, exhaustively across the closed
@@ -437,6 +461,12 @@ mod tests {
                 DatedCashflow::new(1.0, Money::new(110.0, currency).unwrap()).unwrap(),
             ];
             assert_eq!(
+                DatedCashflows::new(&mixed).currency().unwrap(),
+                currency,
+                "the accessor lost the denomination of an Xxx-and-{} dated series",
+                currency.code(),
+            );
+            assert_eq!(
                 DatedCashflows::new(&mixed)
                     .net_present_value(annual(0.05))
                     .unwrap()
@@ -450,6 +480,7 @@ mod tests {
                 DatedCashflow::new(0.0, Money::new(-100.0, currency).unwrap()).unwrap(),
                 DatedCashflow::new(1.0, Money::new(110.0, currency).unwrap()).unwrap(),
             ];
+            assert_eq!(DatedCashflows::new(&uniform).currency().unwrap(), currency);
             assert_eq!(
                 DatedCashflows::new(&uniform)
                     .net_present_value(annual(0.05))
@@ -465,6 +496,10 @@ mod tests {
     #[test]
     fn an_empty_dated_series_is_currency_agnostic() {
         let empty: [DatedCashflow; 0] = [];
+        assert_eq!(
+            DatedCashflows::new(&empty).currency().unwrap(),
+            crate::Currency::Xxx
+        );
         assert_eq!(
             DatedCashflows::new(&empty)
                 .net_present_value(annual(0.05))
@@ -487,6 +522,11 @@ mod tests {
         let series = DatedCashflows::new(&mixed);
         assert!(matches!(
             series.net_present_value(annual(0.10)),
+            Err(TvmError::CurrencyMismatch { .. })
+        ));
+        // The accessor gives a caller the strict reading without the XNPV (issue #104).
+        assert!(matches!(
+            series.currency(),
             Err(TvmError::CurrencyMismatch { .. })
         ));
 
