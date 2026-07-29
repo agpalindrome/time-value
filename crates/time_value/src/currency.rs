@@ -460,8 +460,15 @@ impl Currency {
     /// `None` for codes with no minor unit: [`Xxx`](Self::Xxx), the precious
     /// metals ([`Xau`](Self::Xau) &c.), and the fund/testing/unit-of-account
     /// codes. Used only for presentation rounding
-    /// ([`Money::round_to_currency`](crate::Money::round_to_currency)); it never
+    /// ([`Money::round_to_currency`][crate::Money::round_to_currency]); it never
     /// affects computation.
+    #[cfg_attr(
+        not(any(feature = "std", feature = "libm")),
+        doc = "
+
+[crate::Money::round_to_currency]: https://docs.rs/time_value/latest/time_value/struct.Money.html#method.round_to_currency
+"
+    )]
     #[must_use]
     pub const fn minor_unit_exponent(self) -> Option<u8> {
         self.meta().minor

@@ -63,7 +63,7 @@ impl<P: Periodicity> Rate<P> {
     /// periods per year to recover that per-period rate.
     ///
     /// To move a per-period rate to a different *periodicity* while preserving
-    /// its economic value, use [`convert`](Self::convert) instead — that is a
+    /// its economic value, use [`convert`][Self::convert] instead — that is a
     /// different operation (effective, compounding-aware).
     ///
     /// ```
@@ -79,6 +79,13 @@ impl<P: Periodicity> Rate<P> {
     ///
     /// Returns [`TvmError::RateOutOfRange`] if the resulting per-period rate is
     /// not finite or is `<= -1.0` (the same domain [`new`](Self::new) enforces).
+    #[cfg_attr(
+        not(any(feature = "std", feature = "libm")),
+        doc = "
+
+[Self::convert]: https://docs.rs/time_value/latest/time_value/struct.Rate.html#method.convert
+"
+    )]
     pub fn from_nominal_annual(nominal: f64) -> Result<Self, TvmError> {
         Self::new(nominal / f64::from(P::PERIODS_PER_YEAR))
     }
@@ -92,12 +99,19 @@ impl<P: Periodicity> Rate<P> {
     /// `Rate<Annual>`, because a nominal quote compounded monthly is not an
     /// annual per-period rate. For the effective annual rate — one that a
     /// `Rate<Annual>` may legitimately hold — use
-    /// [`effective_annual`](Self::effective_annual).
+    /// [`effective_annual`][Self::effective_annual].
     ///
     /// # Errors
     ///
     /// Returns [`TvmError::Overflow`] if scaling leaves the finite range (only for
     /// an absurdly large rate); see `docs/adr/0021-fallible-operations-on-non-finite-results.md`.
+    #[cfg_attr(
+        not(any(feature = "std", feature = "libm")),
+        doc = "
+
+[Self::effective_annual]: https://docs.rs/time_value/latest/time_value/struct.Rate.html#method.effective_annual
+"
+    )]
     pub fn nominal_annual(self) -> Result<f64, TvmError> {
         let nominal = self.per_period * f64::from(P::PERIODS_PER_YEAR);
         if nominal.is_finite() {
@@ -142,6 +156,7 @@ impl<P: Periodicity> Rate<P> {
 /// Conversions between periodicities — effective, compounding-aware, and so
 /// dependent on `powf` (behind `std` / `libm`; ADR-0024).
 #[cfg(any(feature = "std", feature = "libm"))]
+#[cfg_attr(docsrs, doc(cfg(any(feature = "std", feature = "libm"))))]
 impl<P: Periodicity> Rate<P> {
     /// Converts to the equivalent rate at a different periodicity `Q`, preserving
     /// economic value: the two rates compound to the same amount over any horizon.

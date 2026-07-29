@@ -24,7 +24,7 @@ the old one **Superseded** (link both ways) — don't rewrite the old one.
 | [0003](0003-synchronous-computation-model.md) | Synchronous computation model | Accepted |
 | [0004](0004-error-handling.md) | Error handling | Accepted |
 | [0005](0005-domain-modelling-and-strong-typing.md) | Domain modelling & strong typing | Accepted (amended by 0019) |
-| [0006](0006-license.md) | License | Accepted |
+| [0006](0006-license.md) | License | Accepted (amended by 0055) |
 | [0007](0007-rust-edition-and-msrv.md) | Rust edition & MSRV | Accepted |
 | [0008](0008-nix-flake-dev-environment.md) | Nix flake dev environment | Accepted |
 | [0009](0009-no_std-and-optional-libm.md) | `no_std` core & optional `libm` | Accepted (amended by 0019) |
@@ -73,3 +73,4 @@ the old one **Superseded** (link both ways) — don't rewrite the old one.
 | [0052](0052-tvmerror-variant-granularity.md) | `TvmError` variant granularity — a payload on `CurrencyMismatch`, `Undefined` split | Accepted (amends 0004, 0031) |
 | [0053](0053-fxrate-domain-and-currency-ordering.md) | `FxRate`'s domain is closed under reciprocal, `from` → `source`, and `Currency`'s ordering policy | Accepted (amends 0034) |
 | [0054](0054-numeric-robustness-of-the-core-operations.md) | Numeric robustness — schedule termination, rounding finiteness, cancellation-free annuity factors, and what counts as a root | Accepted (amends 0020, 0021, 0027) |
+| [0055](0055-publish-readiness-of-the-packaged-crate.md) | Publish readiness — what ships in the tarball, and a README that cannot rot | Accepted (amends 0006) |

@@ -244,6 +244,7 @@ impl Money {
     /// # Ok::<(), time_value::TvmError>(())
     /// ```
     #[cfg(any(feature = "std", feature = "libm"))]
+    #[cfg_attr(docsrs, doc(cfg(any(feature = "std", feature = "libm"))))]
     #[must_use]
     pub fn round_to_currency(self) -> Self {
         let Some(exponent) = self.currency.minor_unit_exponent() else {

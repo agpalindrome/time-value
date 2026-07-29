@@ -92,9 +92,25 @@ jobs:
         run: nix develop -c cargo nextest run -p time_value --no-default-features --features libm
 
       # nextest does not run doctests; run them explicitly (they include the
-      # `compile_fail` doctests that prove the periodicity mismatch is rejected).
+      # `compile_fail` doctests that prove the periodicity mismatch is rejected,
+      # and the core crate's README, which is compiled as a doctest so the
+      # crates.io front page cannot drift from the API — ADR-0055).
       - name: Doctests
         run: nix develop -c cargo test --doc --workspace --all-features
+
+      # Rustdoc warnings are part of the published artefact: a broken intra-doc
+      # link in this crate is emitted into every downstream `cargo doc` run.
+      # Check both the advertised default (`no_std`, where most of the API is
+      # gated away) and the all-features surface docs.rs builds (ADR-0055).
+      - name: Docs (default features)
+        run: nix develop -c cargo doc -p time_value --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+      - name: Docs (all features)
+        run: nix develop -c cargo doc -p time_value --no-deps --all-features
+        env:
+          RUSTDOCFLAGS: -D warnings
 
       # The core library keeps a conservative MSRV (1.85) below the workspace
       # toolchain (1.88, forced by the MCP crate's deps). Verify it on a real 1.85

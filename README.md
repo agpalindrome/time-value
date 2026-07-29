@@ -31,8 +31,8 @@ use time_value::{Cashflows, Money, Monthly, Rate};
 // Pure-number TVM is currency-agnostic; `Money::new(amount, currency)` denominates it.
 let flows = [Money::agnostic(-100.0)?, Money::agnostic(60.0)?, Money::agnostic(60.0)?];
 let project = Cashflows::<Monthly>::new(&flows);
-let npv = project.net_present_value(Rate::<Monthly>::new(0.01)?); // ≈ 18.22
-let irr = project.internal_rate_of_return()?;                     // ≈ 0.1307
+let npv = project.net_present_value(Rate::<Monthly>::new(0.01)?)?; // ≈ 18.22
+let irr = project.internal_rate_of_return()?;                      // ≈ 0.1307
 ```
 
 From the shell ([`time-value` CLI](crates/time-value-cli)):
@@ -72,7 +72,7 @@ nix develop -c cargo deny check
 
 The workspace builds on Rust **1.88** (`rust-toolchain.toml`); the published
 `time_value` library keeps a lower **1.85** MSRV, which CI verifies separately
-(`nix develop .#msrv -c cargo test -p time_value --all-features`). The canonical
+(`nix develop .#msrv -c cargo build -p time_value --all-features`). The canonical
 check list is [`.github/workflows/ci.yml`](.github/workflows/ci.yml); `CLAUDE.md`
 documents the full workflow.
 

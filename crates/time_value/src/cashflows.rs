@@ -232,6 +232,7 @@ impl<'a, P: Periodicity> Cashflows<'a, P> {
 /// behind the `std` / `libm` features (ADR-0026), unlike the arithmetic-only
 /// NPV/NFV/IRR above.
 #[cfg(any(feature = "std", feature = "libm"))]
+#[cfg_attr(docsrs, doc(cfg(any(feature = "std", feature = "libm"))))]
 impl<P: Periodicity> Cashflows<'_, P> {
     /// The **modified** internal rate of return: the per-period rate at which the
     /// present value of the series' outflows grows to the future value of its
@@ -456,6 +457,10 @@ impl<P: Periodicity> OwnedCashflows<P> {
 /// The modified internal rate of return forwards like the others, but is gated on
 /// the transcendental-math features that give [`Cashflows`] its `mirr` (ADR-0026).
 #[cfg(all(feature = "alloc", any(feature = "std", feature = "libm")))]
+#[cfg_attr(
+    docsrs,
+    doc(cfg(all(feature = "alloc", any(feature = "std", feature = "libm"))))
+)]
 impl<P: Periodicity> OwnedCashflows<P> {
     /// The modified internal rate of return. See
     /// [`Cashflows::modified_internal_rate_of_return`].

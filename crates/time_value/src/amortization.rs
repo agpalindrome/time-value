@@ -6,10 +6,21 @@
 //! available in the default `no_std` build. Build one from an explicit level
 //! payment with [`Schedule::with_payment`] (arithmetic-only), or from a term with
 //! [`Schedule::for_term`], which sizes the payment via
-//! [`annuity::payment`](crate::annuity::payment) and so needs `std`/`libm`.
+//! [`annuity::payment`][crate::annuity::payment] and so needs `std`/`libm`.
 //!
 //! Each period splits the payment into the interest on the opening balance and
 //! the principal that reduces it; the final installment clears whatever remains.
+// `for_term` and `annuity::payment` are gated, so in the default `no_std` build
+// these links have no local target; define them as their docs.rs URLs instead of
+// warning (ADR-0055).
+#![cfg_attr(
+    not(any(feature = "std", feature = "libm")),
+    doc = "
+
+[`Schedule::for_term`]: https://docs.rs/time_value/latest/time_value/amortization/struct.Schedule.html#method.for_term
+[crate::annuity::payment]: https://docs.rs/time_value/latest/time_value/annuity/fn.payment.html
+"
+)]
 
 use core::marker::PhantomData;
 
@@ -194,7 +205,7 @@ impl<P: Periodicity> Schedule<P> {
     /// - [`TvmError::PaymentDoesNotAmortize`] if `payment` cannot amortise
     ///   `principal` — the first period would not reduce the balance, so no finite
     ///   schedule exists (ADR-0027, ADR-0031, ADR-0052, ADR-0054). That covers the
-    ///   arithmetic case [`annuity::periods`](crate::annuity::periods) rejects, a
+    ///   arithmetic case [`annuity::periods`][crate::annuity::periods] rejects, a
     ///   payment not exceeding the first period's interest (`PMT ≤ PV·r`), *and*
     ///   the floating-point one it does not: a payment that exceeds the interest by
     ///   so little that the reduction is smaller than the ULP of the balance, so
@@ -204,6 +215,13 @@ impl<P: Periodicity> Schedule<P> {
     /// - [`TvmError::CurrencyMismatch`] if `payment` and `principal` are in
     ///   distinct non-`Xxx` currencies, so the schedule has no single
     ///   denomination (ADR-0034).
+    #[cfg_attr(
+        not(any(feature = "std", feature = "libm")),
+        doc = "
+
+[crate::annuity::periods]: https://docs.rs/time_value/latest/time_value/annuity/fn.periods.html
+"
+    )]
     pub fn with_payment(
         rate: Rate<P>,
         payment: Payment,
@@ -277,6 +295,7 @@ struct Step {
 /// [`Schedule::for_term`] sizes the payment with [`annuity::payment`](crate::annuity::payment),
 /// so it needs `powf` and is behind `std` / `libm` (ADR-0027).
 #[cfg(any(feature = "std", feature = "libm"))]
+#[cfg_attr(docsrs, doc(cfg(any(feature = "std", feature = "libm"))))]
 impl<P: Periodicity> Schedule<P> {
     /// A schedule repaying `principal` at `rate` over `periods` periods, with the
     /// level payment computed by [`annuity::payment`](crate::annuity::payment). The
