@@ -245,6 +245,48 @@ impl<P: Periodicity> Schedule<P> {
         Ok(schedule)
     }
 
+    /// The [`Currency`] every installment of this schedule is denominated in — the
+    /// folded currency of the `principal` and `payment` it was built from, by
+    /// ADR-0034's [`Currency::Xxx`] identity rule.
+    ///
+    /// Infallible, unlike the series accessors [`Cashflows::currency`] and
+    /// [`DatedCashflows::currency`][crate::DatedCashflows::currency]: the fold
+    /// happens once in [`with_payment`](Self::with_payment), which is where a
+    /// mismatch is reported, so a `Schedule` that exists is already denominated in
+    /// exactly one currency (ADR-0045 — the invariant is established at the
+    /// chokepoint).
+    ///
+    /// This is the only route to the denomination of an **empty** schedule — a
+    /// non-positive principal yields no installments to read a [`Money`] from.
+    ///
+    /// [`Cashflows::currency`]: crate::Cashflows::currency
+    ///
+    /// ```
+    /// use time_value::{amortization::Schedule, Currency, Money, Monthly, Payment, Principal, Rate};
+    ///
+    /// let schedule = Schedule::with_payment(
+    ///     Rate::<Monthly>::new(0.10)?,
+    ///     Payment(Money::agnostic(500.0)?),          // `Xxx` is the identity …
+    ///     Principal(Money::new(1000.0, Currency::Usd)?), // … so the schedule is USD
+    /// )?;
+    /// assert_eq!(schedule.currency(), Currency::Usd);
+    /// # Ok::<(), time_value::TvmError>(())
+    /// ```
+    // `DatedCashflows` is gated behind the transcendental-math features, so in the
+    // default `no_std` build the intra-doc link has no target; point it at docs.rs
+    // instead, the pattern `Rate`'s gated links already use (ADR-0055).
+    #[cfg_attr(
+        not(any(feature = "std", feature = "libm")),
+        doc = "
+
+[crate::DatedCashflows::currency]: https://docs.rs/time_value/latest/time_value/struct.DatedCashflows.html#method.currency
+"
+    )]
+    #[must_use]
+    pub const fn currency(&self) -> Currency {
+        self.currency
+    }
+
     /// This period's split of the payment, and the balance it leaves — or `None`
     /// if the period does not **strictly** reduce the balance.
     ///
@@ -485,6 +527,14 @@ mod tests {
                 let schedule =
                     Schedule::with_payment(rate(0.10), Payment(payment), Principal(principal))
                         .unwrap();
+                // The accessor reports the folded denomination the rows carry, and
+                // does so before a single row is drawn (issue #104).
+                assert_eq!(
+                    schedule.currency(),
+                    currency,
+                    "the accessor lost a {} schedule's denomination",
+                    currency.code(),
+                );
                 let mut rows = 0;
                 for installment in schedule {
                     rows += 1;
@@ -506,6 +556,24 @@ mod tests {
                 assert_eq!(rows, 3, "the 1000-at-10%-paying-500 schedule is 3 periods");
             }
         }
+    }
+
+    /// An **empty** schedule has no installment to read a `Money` from, so the
+    /// accessor is the only route to its denomination — the case that makes it worth
+    /// exposing rather than leaving callers to inspect the first row (issue #104).
+    #[test]
+    fn an_empty_schedule_still_reports_its_currency() {
+        use crate::Currency;
+        // A non-positive principal is nothing to repay: an empty schedule, not an
+        // error. The currency is still folded from the inputs.
+        let schedule = Schedule::with_payment(
+            rate(0.10),
+            Payment(Money::new(500.0, Currency::Usd).unwrap()),
+            Principal(Money::agnostic(0.0).unwrap()),
+        )
+        .unwrap();
+        assert_eq!(schedule.currency(), Currency::Usd);
+        assert_eq!(schedule.count(), 0);
     }
 
     /// The defect ADR-0054 fixes: each of these constructed `Ok` and then iterated

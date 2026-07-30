@@ -81,11 +81,38 @@ impl<'a, P: Periodicity> Cashflows<'a, P> {
     /// [`Currency::Xxx`] identity rule — the denomination of any monetary result.
     /// An empty (or wholly agnostic) series is [`Currency::Xxx`].
     ///
+    /// This is the fold the denominated operations run for themselves
+    /// ([`net_present_value`](Self::net_present_value) and friends), exposed so a
+    /// caller can ask the question directly: what currency will an NPV of this
+    /// series come back in, and is the series well-formed at all — without paying
+    /// for the computation to find out.
+    ///
+    /// It is also the strict reading ADR-0057 points at. The rate solves
+    /// ([`internal_rate_of_return`](Self::internal_rate_of_return) and the rest)
+    /// deliberately do **not** fold the currencies, because a rate has no
+    /// denomination; a caller who wants a mixed series rejected there too can call
+    /// this first.
+    ///
+    /// ```
+    /// use time_value::{Cashflows, Currency, Money, Monthly};
+    ///
+    /// // `Xxx` is the identity, so a series mixing it with one real currency is
+    /// // denominated in that currency.
+    /// let flows = [Money::agnostic(-100.0)?, Money::new(60.0, Currency::Eur)?];
+    /// assert_eq!(Cashflows::<Monthly>::new(&flows).currency()?, Currency::Eur);
+    ///
+    /// // Two distinct real currencies have no single denomination.
+    /// let mixed = [Money::new(-100.0, Currency::Usd)?, Money::new(60.0, Currency::Eur)?];
+    /// assert!(Cashflows::<Monthly>::new(&mixed).currency().is_err());
+    /// # Ok::<(), time_value::TvmError>(())
+    /// ```
+    ///
     /// # Errors
     ///
     /// [`TvmError::CurrencyMismatch`] if the flows mix distinct non-`Xxx`
-    /// currencies (ADR-0034).
-    fn currency(self) -> Result<Currency, TvmError> {
+    /// currencies (ADR-0034). The fold stops at the first clash, so `left` is what
+    /// had accumulated and `right` is the flow that broke it.
+    pub fn currency(self) -> Result<Currency, TvmError> {
         let mut acc = Currency::Xxx;
         for cf in self.flows {
             acc = combine(acc, cf.currency())?;
@@ -174,9 +201,10 @@ impl<'a, P: Periodicity> Cashflows<'a, P> {
     /// there is no currency to derive; the operations that *do* check are the ones
     /// returning [`Money`]. A series
     /// [`net_present_value`](Self::net_present_value) rejects therefore still has
-    /// an IRR — the rate that zeroes the sum of the bare magnitudes. Fold the
-    /// currencies yourself (or call `net_present_value` once) if a mixed series
-    /// should be an error at your call site.
+    /// an IRR — the rate that zeroes the sum of the bare magnitudes. Call
+    /// [`currency`](Self::currency) first if a mixed series should be an error at
+    /// your call site: it is the same fold, and it returns the same
+    /// `CurrencyMismatch`.
     ///
     /// # Errors
     ///
@@ -430,6 +458,16 @@ impl<P: Periodicity> OwnedCashflows<P> {
         self.flows.is_empty()
     }
 
+    /// The single [`Currency`] the series is denominated in. See
+    /// [`Cashflows::currency`].
+    ///
+    /// # Errors
+    ///
+    /// As [`Cashflows::currency`].
+    pub fn currency(&self) -> Result<Currency, TvmError> {
+        self.as_cashflows().currency()
+    }
+
     /// The net present value of the series discounted at `rate`. See
     /// [`Cashflows::net_present_value`].
     ///
@@ -606,7 +644,10 @@ mod tests {
             right: Currency::Eur,
         };
         assert_eq!(series.net_present_value(rate), Err(expected.clone()));
-        assert_eq!(series.net_future_value(rate), Err(expected));
+        assert_eq!(series.net_future_value(rate), Err(expected.clone()));
+        // The accessor the operations fold through reports the same error directly
+        // (issue #104) — the operations have no separate opinion.
+        assert_eq!(series.currency(), Err(expected));
     }
 
     /// The fold stops at the **first** clash, so the payload names the currency
@@ -622,13 +663,15 @@ mod tests {
             Money::new(60.0, Currency::Jpy).unwrap(),
         ];
         let rate = Rate::<Monthly>::new(0.01).unwrap();
+        let expected = TvmError::CurrencyMismatch {
+            left: Currency::Usd,
+            right: Currency::Eur,
+        };
         assert_eq!(
             Cashflows::<Monthly>::new(&flows).net_present_value(rate),
-            Err(TvmError::CurrencyMismatch {
-                left: Currency::Usd,
-                right: Currency::Eur,
-            })
+            Err(expected.clone())
         );
+        assert_eq!(Cashflows::<Monthly>::new(&flows).currency(), Err(expected));
     }
 
     /// ADR-0034's identity rule, folded over a whole *series*: a series mixing
@@ -650,6 +693,12 @@ mod tests {
             ];
             let series = Cashflows::<Monthly>::new(&mixed);
             assert_eq!(
+                series.currency().unwrap(),
+                currency,
+                "the accessor lost the denomination of an Xxx-and-{} series",
+                currency.code(),
+            );
+            assert_eq!(
                 series.net_present_value(rate).unwrap().currency(),
                 currency,
                 "npv of an Xxx-and-{} series lost the denomination",
@@ -669,6 +718,7 @@ mod tests {
                 Money::new(60.0, currency).unwrap(),
             ];
             let series = Cashflows::<Monthly>::new(&uniform);
+            assert_eq!(series.currency().unwrap(), currency);
             assert_eq!(series.net_present_value(rate).unwrap().currency(), currency);
             assert_eq!(series.net_future_value(rate).unwrap().currency(), currency);
         }
@@ -682,6 +732,7 @@ mod tests {
         let empty: [Money; 0] = [];
         let series = Cashflows::<Monthly>::new(&empty);
         let rate = Rate::<Monthly>::new(0.05).unwrap();
+        assert_eq!(series.currency().unwrap(), Currency::Xxx);
         assert_eq!(
             series.net_present_value(rate).unwrap().currency(),
             Currency::Xxx
@@ -709,6 +760,13 @@ mod tests {
         // NPV, which is denominated, refuses.
         assert!(matches!(
             series.net_present_value(Rate::<Monthly>::new(0.01).unwrap()),
+            Err(TvmError::CurrencyMismatch { .. })
+        ));
+
+        // …and the accessor ADR-0057's `# Currency` sections point a caller at gives
+        // them the strict reading themselves, without running the NPV (issue #104).
+        assert!(matches!(
+            series.currency(),
             Err(TvmError::CurrencyMismatch { .. })
         ));
 
@@ -1133,6 +1191,7 @@ mod tests {
             assert!(owned.is_empty());
             let rate = Rate::<Monthly>::new(0.05).unwrap();
             assert_eq!(owned.net_present_value(rate).unwrap(), Money::ZERO);
+            assert_eq!(owned.currency().unwrap(), crate::Currency::Xxx);
         }
 
         /// The forwards inherit the currency fold, because they forward — but
@@ -1153,7 +1212,9 @@ mod tests {
                 right: Currency::Eur,
             };
             assert_eq!(owned.net_present_value(rate), Err(expected.clone()));
-            assert_eq!(owned.net_future_value(rate), Err(expected));
+            assert_eq!(owned.net_future_value(rate), Err(expected.clone()));
+            // The forwarded accessor too (issue #104).
+            assert_eq!(owned.currency(), Err(expected));
             // The rate-returning forward still answers (ADR-0057).
             assert!(owned.internal_rate_of_return().is_ok());
 
@@ -1164,6 +1225,7 @@ mod tests {
                     Money::new(60.0, currency).unwrap(),
                     Money::agnostic(60.0).unwrap(),
                 ]);
+                assert_eq!(owned.currency().unwrap(), currency);
                 assert_eq!(owned.net_present_value(rate).unwrap().currency(), currency);
                 assert_eq!(owned.net_future_value(rate).unwrap().currency(), currency);
             }
