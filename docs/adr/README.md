@@ -44,10 +44,10 @@ the old one **Superseded** (link both ways) — don't rewrite the old one.
 | [0023](0023-money-arithmetic-surface.md) | The `Money` arithmetic surface — `Neg` and `try_*` | Accepted (amended by 0061) |
 | [0024](0024-rate-conversions-effective-and-nominal.md) | Rate conversions — effective between periodicities, nominal as a quote | Accepted |
 | [0025](0025-solve-for-periods-and-rate.md) | Solve for periods (NPER) and rate (RATE) | Accepted (amended by 0056, 0062, 0063) |
-| [0026](0026-modified-internal-rate-of-return.md) | Modified internal rate of return (MIRR) | Accepted |
+| [0026](0026-modified-internal-rate-of-return.md) | Modified internal rate of return (MIRR) | Accepted (amended by 0065 — a dated counterpart, annualised over years) |
 | [0027](0027-amortization-schedule.md) | Amortization schedule as a lazy iterator | Accepted (amended by 0051, 0054) |
 | [0028](0028-binary-surface-conventions.md) | Binary surface conventions (CLI grammar & MCP tools) | Accepted (its §4/§5 output shape amended by 0039; extended by 0049, 0062) |
-| [0029](0029-dated-cashflows-xnpv-xirr.md) | Dated cashflows — XNPV / XIRR | Accepted (amended by 0030) |
+| [0029](0029-dated-cashflows-xnpv-xirr.md) | Dated cashflows — XNPV / XIRR | Accepted (amended by 0030; amended by 0065 — the dated net future value it rejected, plus a dated MIRR and an owned series) |
 | [0030](0030-shared-day-count-support-crate.md) | Shared day-count support crate | Accepted |
 | [0031](0031-split-non-finite-result-into-overflow-and-undefined.md) | Split `NonFiniteResult` into `Overflow` and `Undefined` | Accepted |
 | [0032](0032-ergonomic-convenience-impls.md) | Ergonomic convenience impls (`ZERO` / `Default` / `TryFrom` / `From`) | Accepted (amended by 0061) |
@@ -61,7 +61,7 @@ the old one **Superseded** (link both ways) — don't rewrite the old one.
 | [0040](0040-fx-convert-in-the-binaries.md) | FX convert in the binaries — a standalone `convert` surface | Accepted |
 | [0041](0041-continuous-compounding-in-the-binaries.md) | Continuous compounding in the binaries — a `continuous` family | Accepted (extended by 0064 — the two solves) |
 | [0042](0042-serde-support.md) | `serde` support — an optional, validating wire format | Accepted (amends 0019; amended by 0060) |
-| [0043](0043-owned-cashflows.md) | Owned cashflows — `OwnedCashflows` behind an `alloc` feature | Accepted (amended by 0060) |
+| [0043](0043-owned-cashflows.md) | Owned cashflows — `OwnedCashflows` behind an `alloc` feature | Accepted (amended by 0060, 0065 — a dated owned counterpart) |
 | [0044](0044-schemars-support.md) | `schemars` support — JsonSchema companion to the serde wire format | Accepted (extended by 0060) |
 | [0045](0045-make-illegal-states-unrepresentable.md) | Make illegal states unrepresentable; test the class, not the instance | Accepted |
 | [0046](0046-thread-safety-of-the-public-types.md) | The public value types are thread-safe (`Send + Sync`), locked by a test | Accepted |
@@ -78,8 +78,9 @@ the old one **Superseded** (link both ways) — don't rewrite the old one.
 | [0057](0057-currency-is-checked-where-a-result-is-denominated.md) | Currency is checked where a result is denominated — the rate solves do not fold it | Accepted (amends 0034) |
 | [0058](0058-money-display-carries-its-currency.md) | `Money`'s `Display` carries its currency — bare for `XXX`, magnitude then ISO code otherwise | Accepted (amends 0034) |
 | [0059](0059-the-finite-scalars-are-totally-ordered.md) | The finite-by-construction scalars are totally ordered (`Eq` + `Ord`), `Money` stays partial | Accepted (amends 0035, extends 0005) |
-| [0060](0060-owned-cashflows-on-the-wire.md) | `OwnedCashflows` on the wire — a bare array of `Money`, no periodicity | Accepted (amends 0042, 0043; extends 0044) |
+| [0060](0060-owned-cashflows-on-the-wire.md) | `OwnedCashflows` on the wire — a bare array of `Money`, no periodicity | Accepted (amends 0042, 0043; extends 0044; amended by 0065 — a second sequence type) |
 | [0061](0061-money-and-currency-ergonomics.md) | `Money`/`Currency` ergonomics — `try_sum` not `Sum`, fallible `min`/`max`, infallible sign, lenient `FromStr` | Accepted (amends 0023, 0032; extends 0052) |
 | [0062](0062-annuity-sinking-fund-and-perpetuity-due.md) | The sinking-fund payment and the perpetuity-due | Accepted (amends 0015, 0025; extends 0028, 0049; extended by 0063) |
 | [0063](0063-annuity-due-solves-and-growing-inverses.md) | The annuity-due solves and the growing-annuity inverses | Accepted (amends 0015, 0025, 0048, 0056; extends 0028, 0049) |
 | [0064](0064-continuous-solves.md) | The continuous solves — force of interest and span (closed forms, a two-sided `ln1p`, and `IndeterminateSpan`) | Accepted (amends 0036, 0041; extends 0025, 0028, 0056) |
+| [0065](0065-dated-counterparts.md) | The dated counterparts — a net future value at the horizon, a MIRR over the span in years, and an owned dated series | Accepted (amends 0026, 0029, 0043, 0060; extends 0028, 0056, 0057) |

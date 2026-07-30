@@ -90,6 +90,7 @@ Two standing rules; ADR-0045 has the full statement and rationale.
   nix develop -c cargo clippy -p time_value --no-default-features --features alloc,libm --all-targets -- -D warnings # no_std + alloc (owned)
   nix develop -c cargo clippy -p time_value --no-default-features --features alloc,serde -- -D warnings # no_std + alloc + serde, LIB ONLY (ADR-0060)
   nix develop -c cargo clippy -p time_value --no-default-features --features schemars --all-targets -- -D warnings # no_std + schemars
+  nix develop -c cargo clippy -p time_value --no-default-features --features alloc,libm,serde,schemars -- -D warnings # no_std dated wire (lib only, ADR-0065)
   nix develop -c cargo nextest run --workspace --all-features
   nix develop -c cargo test --doc --workspace --all-features                        # doctests
   nix develop .#msrv -c cargo build -p time_value --all-features                    # core MSRV (1.85): build, not test, so dev-deps don't gate it

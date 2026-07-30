@@ -13,7 +13,7 @@ the core library stays synchronous.
 | `npv`, `nfv` | net present / future value of a cashflow series at a per-period rate |
 | `irr` | internal rate of return of a series |
 | `mirr` | modified internal rate of return (finance + reinvestment rates) |
-| `xnpv`, `xirr` | net present value / internal rate of return of cashflows on irregular ISO dates, at an annual rate |
+| `xnpv`, `xnfv`, `xirr`, `xmirr` | the same four operations over cashflows on irregular ISO dates, at an annual rate — `xnpv` values the series at the first date given, `xnfv` at the latest one, and `xmirr` annualises over the years between the earliest and latest |
 | `single_sum_present_value`, `single_sum_future_value` | a single sum over a number of periods |
 | `single_sum_periods`, `single_sum_rate` | solve a single sum for periods (NPER) or rate (RATE) |
 | `annuity_present_value`, `annuity_future_value` | ordinary (end-of-period) annuities |
@@ -26,10 +26,11 @@ the core library stays synchronous.
 | `rate_effective_annual`, `rate_convert`, `rate_from_nominal`, `rate_nominal` | rate conversions (each takes a periodicity) |
 | `amortize` | an amortization schedule (array of rows) from a term or a level payment |
 
-Rates are per period (annual for `xnpv`/`xirr`); cashflows are signed (outflow
-negative). `xnpv`/`xirr` take `{date, amount}` flows with ISO `YYYY-MM-DD` dates,
-discounted by year-fraction (ACT/365) from the first date. Each tool returns a
-one-field structured JSON result keyed by the operation.
+Rates are per period (annual for the dated `x…` tools); cashflows are signed
+(outflow negative). The dated tools take `{date, amount}` flows with ISO
+`YYYY-MM-DD` dates, converted to year-fractions (ACT/365); the flows need not be
+in date order. Each tool returns a one-field structured JSON result keyed by the
+operation.
 
 ## Install
 

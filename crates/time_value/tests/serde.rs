@@ -238,6 +238,121 @@ fn a_mixed_currency_series_deserializes_and_fails_at_the_operation() {
         .is_err());
 }
 
+// ---- OwnedDatedCashflows: a bare array of DatedCashflow -------------------
+//
+// The dated sibling of the block above (ADR-0065). Its own gate is `alloc` plus the
+// transcendental-math feature this file already requires.
+
+/// The dated series is an array of `{ offset_years, amount }` objects, and nothing
+/// else — no wrapper, and no separate reference date: the first entry *is* the XNPV's
+/// reference, so slice order is the wire's order.
+#[cfg(feature = "alloc")]
+#[test]
+fn owned_dated_cashflows_is_a_bare_array_of_dated_cashflows() {
+    use time_value::OwnedDatedCashflows;
+
+    let series = OwnedDatedCashflows::new(vec![
+        DatedCashflow::new(0.0, Money::new(-100.0, Currency::Usd).unwrap()).unwrap(),
+        DatedCashflow::new(1.5, Money::new(110.0, Currency::Usd).unwrap()).unwrap(),
+    ]);
+    assert_eq!(
+        to_value(&series).unwrap(),
+        json!([
+            {"offset_years": 0.0, "amount": {"amount": -100.0, "currency": "USD"}},
+            {"offset_years": 1.5, "amount": {"amount": 110.0, "currency": "USD"}},
+        ])
+    );
+    let back: OwnedDatedCashflows = from_str(
+        r#"[{"offset_years":0.0,"amount":{"amount":-100.0,"currency":"USD"}},
+            {"offset_years":1.5,"amount":{"amount":110.0,"currency":"USD"}}]"#,
+    )
+    .unwrap();
+    assert_eq!(back, series);
+}
+
+/// An empty dated series is an empty array, both ways round.
+#[cfg(feature = "alloc")]
+#[test]
+fn an_empty_dated_series_round_trips_as_an_empty_array() {
+    use time_value::OwnedDatedCashflows;
+
+    let empty = OwnedDatedCashflows::new(Vec::new());
+    assert_eq!(to_value(&empty).unwrap(), json!([]));
+    let back: OwnedDatedCashflows = from_str("[]").unwrap();
+    assert_eq!(back, empty);
+    assert!(back.is_empty());
+}
+
+/// Element-wise validation: each entry is rebuilt through `DatedCashflow::new`, so a
+/// non-finite **offset** — the invariant that type adds over a plain `Money` — fails
+/// the whole document, as does a bad amount or currency anywhere in it.
+#[cfg(feature = "alloc")]
+#[test]
+fn one_invalid_dated_element_rejects_the_whole_series() {
+    use time_value::OwnedDatedCashflows;
+
+    // `1e999` overflows `f64` to an infinity, which is not a valid offset…
+    assert!(from_str::<OwnedDatedCashflows>(
+        r#"[{"offset_years":1e999,"amount":{"amount":1.0,"currency":"USD"}}]"#
+    )
+    .is_err());
+    // …nor a valid amount, mid-series.
+    assert!(from_str::<OwnedDatedCashflows>(
+        r#"[{"offset_years":0.0,"amount":{"amount":1.0,"currency":"USD"}},
+            {"offset_years":1.0,"amount":{"amount":1e999,"currency":"USD"}}]"#
+    )
+    .is_err());
+    // …and an unknown currency code is refused the same way.
+    assert!(from_str::<OwnedDatedCashflows>(
+        r#"[{"offset_years":0.0,"amount":{"amount":1.0,"currency":"ZZZ"}}]"#
+    )
+    .is_err());
+}
+
+/// A deserialized dated series is a *working* series: all four operations run on the
+/// value that came off the wire, including the two ADR-0065 adds.
+#[cfg(feature = "alloc")]
+#[test]
+fn a_deserialized_dated_series_computes() {
+    use time_value::OwnedDatedCashflows;
+
+    let series: OwnedDatedCashflows = from_str(
+        r#"[{"offset_years":0.0,"amount":{"amount":-100.0,"currency":"XXX"}},
+            {"offset_years":1.0,"amount":{"amount":110.0,"currency":"XXX"}}]"#,
+    )
+    .unwrap();
+    let rate = Rate::<Annual>::new(0.10).unwrap();
+    assert!(series.net_present_value(rate).unwrap().value().abs() < 1e-9);
+    assert!(series.net_future_value(rate).unwrap().value().abs() < 1e-9);
+    assert!((series.internal_rate_of_return().unwrap().value() - 0.10).abs() < 1e-9);
+    assert!(series
+        .modified_internal_rate_of_return(rate, rate)
+        .unwrap()
+        .value()
+        .is_finite());
+}
+
+/// Mixed currencies are representable in process, so the wire accepts them too —
+/// deserialization is exactly as permissive as the constructor, and the *operation*
+/// reports the mismatch (ADR-0057, ADR-0060).
+#[cfg(feature = "alloc")]
+#[test]
+fn a_mixed_currency_dated_series_deserializes_and_fails_at_the_operation() {
+    use time_value::OwnedDatedCashflows;
+
+    let series: OwnedDatedCashflows = from_str(
+        r#"[{"offset_years":0.0,"amount":{"amount":-100.0,"currency":"USD"}},
+            {"offset_years":1.0,"amount":{"amount":110.0,"currency":"EUR"}}]"#,
+    )
+    .unwrap();
+    let rate = Rate::<Annual>::new(0.10).unwrap();
+    assert!(series.currency().is_err());
+    assert!(series.net_present_value(rate).is_err());
+    assert!(series.net_future_value(rate).is_err());
+    // …while the rate solves still answer.
+    assert!(series.internal_rate_of_return().is_ok());
+}
+
 // ---- Deserialization validates: an out-of-domain value is an error ---------
 
 #[test]

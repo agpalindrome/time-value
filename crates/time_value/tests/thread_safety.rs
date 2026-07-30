@@ -45,6 +45,10 @@ fn owned_value_types_are_send_sync_static() {
         assert_send_sync_static::<Period<Monthly>>();
         assert_send_sync_static::<ContinuousRate>();
         assert_send_sync_static::<DatedCashflow>();
+
+        // The owned dated series needs `alloc` on top of the math feature.
+        #[cfg(feature = "alloc")]
+        assert_send_sync_static::<OwnedDatedCashflows>();
     }
 }
 

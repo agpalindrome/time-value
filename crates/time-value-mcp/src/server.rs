@@ -23,7 +23,7 @@ use time_value_daycount::{act365_year_fraction, iso_to_day};
 use crate::params::{
     AmortizeInput, AnnuityPaymentInput, AnnuityPeriodsInput, AnnuityRateInput, AnnuityValueInput,
     ContinuousRateInput, ContinuousRateSolveInput, ContinuousValueInput, ContinuousYearsSolveInput,
-    ConvertInput, DatedFlow, DatedIrrInput, DatedSeriesInput, FutureValueInput,
+    ConvertInput, DatedFlow, DatedIrrInput, DatedMirrInput, DatedSeriesInput, FutureValueInput,
     GrowingAnnuityInput, GrowingPaymentInput, GrowingPeriodsInput, GrowingPerpetuityInput,
     GrowingRateInput, IrrInput, MirrInput, Periodicity, PerpetuityInput, PresentValueInput,
     RateConvertInput, RateEffectiveAnnualInput, RateFromNominalInput, SeriesInput,
@@ -71,8 +71,10 @@ macro_rules! dispatch_periodicity {
 const INSTRUCTIONS: &str = "\
 Time-value-of-money calculations, grouped by family. Series: `npv`, `nfv` (net \
 present / future value at a per-period rate), `irr`, `mirr` (modified IRR, with \
-finance and reinvestment rates), and `xnpv`/`xirr` (cashflows on irregular ISO \
-dates, at an annual rate). Single sum: `single_sum_present_value`, \
+finance and reinvestment rates), and the dated counterparts `xnpv`/`xnfv`/`xirr`/\
+`xmirr` (cashflows on irregular ISO dates, at an annual rate — `xnpv` values the \
+series at the first date given, `xnfv` at the latest one). Single sum: \
+`single_sum_present_value`, \
 `single_sum_future_value`, and the solves `single_sum_periods` (NPER) / \
 `single_sum_rate` (RATE). Annuity: `annuity_present_value`, \
 `annuity_future_value`, the solves `annuity_payment` / `annuity_periods` / \
@@ -104,8 +106,8 @@ annual rate. \
 `amortize` returns a schedule (an array of period/payment/interest/principal/\
 balance rows) from a term or a level payment. `convert` restates an amount in \
 another currency at a caller-supplied exchange rate (`amount`, `from`, `to`, \
-`rate` — units of `to` per unit of `from`). Rates are per period (annual for \
-`xnpv`/`xirr`); cashflows are signed (outflow negative). Every amount-bearing \
+`rate` — units of `to` per unit of `from`). Rates are per period (annual for the \
+dated `x…` tools); cashflows are signed (outflow negative). Every amount-bearing \
 tool accepts an optional `currency` (an ISO 4217 code, e.g. `USD`); it \
 denominates the amounts and is echoed on monetary results (omit for \
 currency-agnostic). Source: https://github.com/ojhermann-org/time-value";
@@ -207,6 +209,23 @@ impl TimeValueServer {
     }
 
     #[tool(
+        name = "xnfv",
+        description = "Net future value of cashflows on irregular dates (XNFV), compounded at an annual rate to the series' horizon — the latest date among the flows, whatever order they are given in."
+    )]
+    fn xnfv(
+        &self,
+        Parameters(input): Parameters<DatedSeriesInput>,
+    ) -> Result<Json<MoneyResult>, ErrorData> {
+        let currency = resolve_currency(input.currency);
+        let flows = dated_flows(&input.flows, currency)?;
+        let series = DatedCashflows::new(&flows);
+        let money = series
+            .net_future_value(annual_rate(input.rate)?)
+            .map_err(tvm)?;
+        Ok(Json(money.into()))
+    }
+
+    #[tool(
         name = "xirr",
         description = "Internal rate of return of cashflows on irregular dates (XIRR), as an annual rate: the rate at which their XNPV (ACT/365 from the first date) is zero."
     )]
@@ -221,6 +240,26 @@ impl TimeValueServer {
             .internal_rate_of_return_from(input.guess)
             .map_err(tvm)?;
         Ok(Json(ScalarResult::new(irr.value())))
+    }
+
+    #[tool(
+        name = "xmirr",
+        description = "Modified internal rate of return of cashflows on irregular dates (XMIRR), as an annual rate: discounts outflows to the earliest date at a finance rate, compounds inflows to the latest at a reinvestment rate, then annualises over the years between them."
+    )]
+    fn xmirr(
+        &self,
+        Parameters(input): Parameters<DatedMirrInput>,
+    ) -> Result<Json<ScalarResult>, ErrorData> {
+        let currency = resolve_currency(input.currency);
+        let flows = dated_flows(&input.flows, currency)?;
+        let series = DatedCashflows::new(&flows);
+        let mirr = series
+            .modified_internal_rate_of_return(
+                annual_rate(input.finance)?,
+                annual_rate(input.reinvest)?,
+            )
+            .map_err(tvm)?;
+        Ok(Json(ScalarResult::new(mirr.value())))
     }
 
     #[tool(

@@ -1,6 +1,9 @@
 # ADR-0026: Modified internal rate of return (MIRR)
 
-- **Status:** Accepted
+- **Status:** Accepted (amended by [0065](0065-dated-counterparts.md) — a dated
+  counterpart on `DatedCashflows`, annualised over a real number of years instead of
+  a count of periods, whose degenerate zero span reports the outcome rather than
+  `ZeroPeriods`)
 - **Date:** 2026-07-10
 - **Deciders:** Project owner
 

@@ -15,8 +15,8 @@ cargo install --path crates/time-value-cli   # installs the `time-value` binary
 
 ## Usage
 
-`--rate` is a **per-period** rate (an **annual** rate for the dated
-`series xnpv`/`xirr`); cashflows are positional (period 0 first, outflows
+`--rate` is a **per-period** rate (an **annual** rate for the dated `series x…`
+commands); cashflows are positional (period 0 first, outflows
 negative). Results print as a plain number, or as JSON with `--json`.
 
 ```sh
@@ -26,10 +26,17 @@ time-value series nfv --rate 0.01 -100 60 60
 time-value series irr -100 60 60                  # 0.1307… per period
 time-value series mirr --finance 0.10 --reinvest 0.12 -1000 -500 800 900
 
-# Dated (irregular) cashflows — XNPV/XIRR at an annual rate, DATE:AMOUNT pairs
+# Dated (irregular) cashflows — the same four at an annual rate, DATE:AMOUNT pairs.
+# The flows need not be in date order: xnpv values the series at the first date
+# given, xnfv at the latest, and xmirr annualises over the years between the
+# earliest and latest.
 time-value series xirr 2008-01-01:-10000 2008-03-01:2750 \
                        2008-10-30:4250 2009-02-15:3250 2009-04-01:2750   # 0.3734…
 time-value series xnpv --rate 0.10 2020-01-01:-100 2021-01-01:110
+time-value series xnfv --rate 0.10 2020-01-01:-100 2021-01-01:110
+time-value series xmirr --finance 0.10 --reinvest 0.12 \
+                        2020-01-01:-1000 2020-07-01:-500 \
+                        2021-04-01:800 2022-01-01:900                    # 0.0950…
 
 # Single sum: present/future value and the solve-for inverses
 time-value single-sum pv   --rate 0.01 --periods 12 --future 1000     # 887.45

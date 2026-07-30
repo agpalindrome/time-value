@@ -88,12 +88,34 @@ pub(crate) struct DatedFlow {
     pub amount: f64,
 }
 
-/// An annual rate and dated cashflows — input for `xnpv`.
+/// An annual rate and dated cashflows — input for `xnpv` and `xnfv`, which differ
+/// only in the date they value the series at (the first flow's, and the latest),
+/// exactly as `npv`/`nfv` share [`SeriesInput`].
 #[derive(Debug, Deserialize, JsonSchema)]
 pub(crate) struct DatedSeriesInput {
-    /// Annual discount rate (e.g. `0.1` for 10% per year).
+    /// Annual rate (e.g. `0.1` for 10% per year): the discount rate for `xnpv`, the
+    /// compounding rate for `xnfv`.
     pub rate: f64,
-    /// Dated cashflows; the first date is the valuation reference.
+    /// Dated cashflows; the first date is the valuation reference for `xnpv`, and
+    /// the latest date is the horizon for `xnfv`.
+    pub flows: Vec<DatedFlow>,
+    /// ISO 4217 currency to denominate the amounts in (e.g. `USD`, `JPY`).
+    /// Omit for currency-agnostic (`XXX`) amounts. An unknown code is rejected.
+    #[serde(default)]
+    pub currency: Option<Currency>,
+}
+
+/// An annual finance rate, an annual reinvestment rate, and dated cashflows — input
+/// for `xmirr`. The dated twin of [`MirrInput`], differing only in that its flows
+/// carry dates and its rates are annual.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub(crate) struct DatedMirrInput {
+    /// Annual finance rate: discounts the outflows to the earliest date.
+    pub finance: f64,
+    /// Annual reinvestment rate: compounds the inflows to the latest date.
+    pub reinvest: f64,
+    /// Dated cashflows; the span between the earliest and latest date is what the
+    /// result is annualised over.
     pub flows: Vec<DatedFlow>,
     /// ISO 4217 currency to denominate the amounts in (e.g. `USD`, `JPY`).
     /// Omit for currency-agnostic (`XXX`) amounts. An unknown code is rejected.

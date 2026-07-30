@@ -8,8 +8,9 @@
 //! ordinary and annuity-due), each annuity-due and growing solve recovers the
 //! argument that produced its input, an amortization schedule conserves the
 //! principal it
-//! repays, currency rounding is idempotent, the dated XNPV agrees with the
-//! periodic NPV on whole-year offsets, `Money`'s arithmetic obeys the usual
+//! repays, currency rounding is idempotent, the dated XNPV / net future value /
+//! MIRR agree with their periodic counterparts on whole-year offsets and the last
+//! two are invariant to the order of the flows, `Money`'s arithmetic obeys the usual
 //! algebraic laws — `try_sum` is the `try_add` fold, `abs` and `signum` decompose an
 //! amount, `try_min`/`try_max` bracket their arguments — the finite scalars'
 //! ordering is the ordering of the value they
@@ -1500,6 +1501,259 @@ proptest! {
         prop_assert!(close(npv, sum, 1e-6));
     }
 
+    /// The cross-engine check for the dated net **future** value (ADR-0065): place the
+    /// flows at whole-year offsets `0, 1, 2, …` and `DatedCashflows` must agree with
+    /// `Cashflows<Annual>`, whose horizon is then the same date. The two share no code
+    /// — one raises `(1 + r)` to a per-flow power, the other folds a running factor by
+    /// Horner — so this is corroboration rather than a restatement, the same kind that
+    /// pins the XNPV.
+    #[test]
+    fn dated_net_future_value_agrees_with_the_periodic_nfv_on_whole_year_offsets(
+        amounts in prop::collection::vec(-1e5f64..1e5, 1..=12),
+        rate in -0.5f64..1.0,
+    ) {
+        use time_value::{Annual, DatedCashflow, DatedCashflows};
+
+        let annual = Rate::<Annual>::new(rate).unwrap();
+
+        let periodic: Vec<Money> = amounts.iter().map(|&a| Money::agnostic(a).unwrap()).collect();
+        let periodic_nfv = Cashflows::<Annual>::new(&periodic)
+            .net_future_value(annual)
+            .unwrap()
+            .value();
+
+        let dated: Vec<DatedCashflow> = amounts
+            .iter()
+            .enumerate()
+            .map(|(i, &a)| {
+                #[allow(clippy::cast_precision_loss)]
+                let offset = i as f64;
+                DatedCashflow::new(offset, Money::agnostic(a).unwrap()).unwrap()
+            })
+            .collect();
+        let dated_nfv = DatedCashflows::new(&dated)
+            .net_future_value(annual)
+            .unwrap()
+            .value();
+
+        // The terms are *compounded*, so the scale they are judged against is the raw
+        // magnitudes grown over the whole span — not their bare sum, as for the XNPV.
+        #[allow(clippy::cast_precision_loss)]
+        let span = (amounts.len() - 1) as f64;
+        let scale = amounts.iter().map(|a| a.abs()).sum::<f64>().max(1.0)
+            * (1.0 + rate).powf(span);
+        prop_assert!(close(dated_nfv, periodic_nfv, 1e-9 * scale));
+    }
+
+    /// The dated MIRR is the periodic MIRR on whole-year offsets (ADR-0065) — the
+    /// strongest available check on the dated annualisation, since `N = len − 1`
+    /// *periods* and `T − t₋` *years* then coincide and the two engines share no code.
+    ///
+    /// The series is built with a leading outflow and a trailing inflow so both
+    /// operations are inside their domain (an outflow to discount, a terminal value to
+    /// grow into); the middle flows are free, including zero-crossing shapes.
+    #[test]
+    fn dated_mirr_agrees_with_the_periodic_mirr_on_whole_year_offsets(
+        outflow in 1.0f64..1e5,
+        middle in prop::collection::vec(-1e5f64..1e5, 1..=9),
+        inflow in 1.0f64..1e5,
+        finance in -0.5f64..1.0,
+        reinvest in -0.5f64..1.0,
+    ) {
+        use time_value::{Annual, DatedCashflow, DatedCashflows};
+
+        let mut amounts = vec![-outflow];
+        amounts.extend(middle);
+        amounts.push(inflow);
+
+        let f = Rate::<Annual>::new(finance).unwrap();
+        let r = Rate::<Annual>::new(reinvest).unwrap();
+
+        let periodic: Vec<Money> = amounts.iter().map(|&a| Money::agnostic(a).unwrap()).collect();
+        let periodic_mirr = Cashflows::<Annual>::new(&periodic)
+            .modified_internal_rate_of_return(f, r)
+            .unwrap()
+            .value();
+
+        let dated: Vec<DatedCashflow> = amounts
+            .iter()
+            .enumerate()
+            .map(|(i, &a)| {
+                #[allow(clippy::cast_precision_loss)]
+                let offset = i as f64;
+                DatedCashflow::new(offset, Money::agnostic(a).unwrap()).unwrap()
+            })
+            .collect();
+        let dated_mirr = DatedCashflows::new(&dated)
+            .modified_internal_rate_of_return(f, r)
+            .unwrap()
+            .value();
+
+        // Compared as growth factors, relative to their own size: the `1/N` root only
+        // shrinks the relative error of the ratio it is taken of.
+        prop_assert!(
+            close(1.0 + dated_mirr, 1.0 + periodic_mirr, 1e-9 * (1.0 + periodic_mirr).abs()),
+            "dated {dated_mirr} vs periodic {periodic_mirr}",
+        );
+    }
+
+    /// `net_future_value`'s rustdoc states the identity `XNFV = XNPV · (1 + r)^(T − t₀)`
+    /// — the horizon is the latest offset, the XNPV's reference the first entry, and
+    /// the span between them is never negative (ADR-0065). Asserted over arbitrary
+    /// *unsorted* series, which is where the two anchors come apart.
+    #[test]
+    fn the_dated_future_value_is_the_present_value_compounded_over_the_life(
+        spec in prop::collection::vec((-1e5f64..1e5, -3.0f64..3.0), 1..=10),
+        rate in -0.5f64..1.0,
+    ) {
+        use time_value::{Annual, DatedCashflow, DatedCashflows};
+
+        let annual = Rate::<Annual>::new(rate).unwrap();
+        // Offsets are taken as generated, so the series is arbitrarily ordered and may
+        // run before the first entry.
+        let flows: Vec<DatedCashflow> = spec
+            .iter()
+            .map(|&(amount, offset)| {
+                DatedCashflow::new(offset, Money::agnostic(amount).unwrap()).unwrap()
+            })
+            .collect();
+        let series = DatedCashflows::new(&flows);
+
+        let npv = series.net_present_value(annual).unwrap().value();
+        let nfv = series.net_future_value(annual).unwrap().value();
+
+        let reference = spec[0].1;
+        let horizon = spec.iter().map(|&(_, t)| t).fold(f64::NEG_INFINITY, f64::max);
+        prop_assert!(horizon >= reference, "the horizon precedes the reference");
+        let growth = (1.0 + rate).powf(horizon - reference);
+
+        let scale = spec.iter().map(|&(a, _)| a.abs()).sum::<f64>().max(1.0) * growth.max(1.0);
+        prop_assert!(close(nfv, npv * growth, 1e-9 * scale), "{nfv} vs {}", npv * growth);
+    }
+
+    /// The dated **future** value does not depend on the order of the slice, where the
+    /// XNPV does — the whole asymmetry ADR-0065 records: the horizon is the latest
+    /// offset, the XNPV's reference is the first entry. Reversing an arbitrary series
+    /// is the permutation a first-entry horizon would fail most visibly on.
+    #[test]
+    fn reordering_a_dated_series_leaves_its_future_value_unchanged(
+        spec in prop::collection::vec((-1e5f64..1e5, -3.0f64..3.0), 2..=10),
+        rate in -0.5f64..1.0,
+    ) {
+        use time_value::{Annual, DatedCashflow, DatedCashflows};
+
+        let annual = Rate::<Annual>::new(rate).unwrap();
+        let build = |ordered: &[(f64, f64)]| -> Vec<DatedCashflow> {
+            ordered
+                .iter()
+                .map(|&(amount, offset)| {
+                    DatedCashflow::new(offset, Money::agnostic(amount).unwrap()).unwrap()
+                })
+                .collect()
+        };
+        let mut backwards = spec.clone();
+        backwards.reverse();
+
+        let forward = build(&spec);
+        let reversed = build(&backwards);
+
+        // Same terms, summed in the other order, so they agree to rounding. The offsets
+        // span at most six years, which bounds the compounding factor.
+        let scale = spec.iter().map(|&(v, _)| v.abs()).sum::<f64>().max(1.0)
+            * (1.0 + rate).powf(6.0).max(1.0);
+        prop_assert!(close(
+            DatedCashflows::new(&forward).net_future_value(annual).unwrap().value(),
+            DatedCashflows::new(&reversed).net_future_value(annual).unwrap().value(),
+            1e-9 * scale,
+        ));
+    }
+
+    /// The XIRR's *root set* is order-independent — rebasing multiplies the XNPV by a
+    /// non-zero factor, which cannot move a zero — so on a **conventional** series,
+    /// where that set holds exactly one rate, reversing the slice cannot change the
+    /// answer.
+    ///
+    /// "Conventional" is load-bearing and was found by this property failing without
+    /// it: a series with several sign changes has several roots, and *which* one the
+    /// solver returns is not order-invariant (rebasing rescales the residual, so Newton
+    /// starts in a different basin and the bracketing fallback's "lowest bracketed
+    /// root" is measured against a different scale). That is the multiple-root
+    /// ambiguity ADR-0020 documents and ADR-0026 offers MIRR as the answer to — not an
+    /// order-dependence in the dated engine. The generator mirrors `xirr_zeroes_the_xnpv`.
+    #[test]
+    fn reordering_a_conventional_dated_series_leaves_its_xirr_unchanged(
+        spec in prop::collection::vec((1.0f64..1e3, 0.25f64..2.0), 1..=8),
+        fraction in 0.3f64..0.95,
+    ) {
+        use time_value::{DatedCashflow, DatedCashflows};
+
+        let total: f64 = spec.iter().map(|&(a, _)| a).sum();
+        let mut forward = vec![
+            DatedCashflow::new(0.0, Money::agnostic(-total * fraction).unwrap()).unwrap(),
+        ];
+        let mut t = 0.0;
+        for (inflow, gap) in spec {
+            t += gap;
+            forward.push(DatedCashflow::new(t, Money::agnostic(inflow).unwrap()).unwrap());
+        }
+        let mut backwards = forward.clone();
+        backwards.reverse();
+
+        let a = DatedCashflows::new(&forward).internal_rate_of_return().unwrap();
+        let b = DatedCashflows::new(&backwards).internal_rate_of_return().unwrap();
+        prop_assert!(
+            close(1.0 + a.value(), 1.0 + b.value(), 1e-6 * (1.0 + a.value()).abs()),
+            "xirr {} vs {}", a.value(), b.value(),
+        );
+    }
+
+    /// The dated MIRR's own order-independence (ADR-0065), on a generator that keeps
+    /// the operation inside its domain: a leading outflow, a trailing inflow, and gaps
+    /// of at least a quarter-year so the span is well away from the degenerate zero.
+    /// Reversing the slice is exactly the permutation that would collapse the span if
+    /// the reference were the *first entry* rather than the earliest offset.
+    #[test]
+    fn the_dated_mirr_ignores_the_order_of_the_flows(
+        outflow in 1.0f64..1e5,
+        spec in prop::collection::vec((-1e5f64..1e5, 0.25f64..2.0), 1..=8),
+        inflow in 1.0f64..1e5,
+        finance in -0.5f64..1.0,
+        reinvest in -0.5f64..1.0,
+    ) {
+        use time_value::{Annual, DatedCashflow, DatedCashflows};
+
+        let f = Rate::<Annual>::new(finance).unwrap();
+        let r = Rate::<Annual>::new(reinvest).unwrap();
+
+        let mut offset = 0.0;
+        let mut forward =
+            vec![DatedCashflow::new(0.0, Money::agnostic(-outflow).unwrap()).unwrap()];
+        for (amount, gap) in spec {
+            offset += gap;
+            forward.push(
+                DatedCashflow::new(offset, Money::agnostic(amount).unwrap()).unwrap(),
+            );
+        }
+        offset += 0.25;
+        forward.push(DatedCashflow::new(offset, Money::agnostic(inflow).unwrap()).unwrap());
+
+        let mut backwards = forward.clone();
+        backwards.reverse();
+
+        let a = DatedCashflows::new(&forward)
+            .modified_internal_rate_of_return(f, r)
+            .unwrap()
+            .value();
+        let b = DatedCashflows::new(&backwards)
+            .modified_internal_rate_of_return(f, r)
+            .unwrap()
+            .value();
+        prop_assert!(
+            close(1.0 + a, 1.0 + b, 1e-9 * (1.0 + a).abs()),
+            "{a} vs {b}",
+        );
+    }
+
     /// The annuity present value is **non-increasing** in the discount rate:
     /// discount a positive stream harder and it is worth no more. This is the
     /// property `annuity::rate`'s rustdoc cites as the reason its residual has a
@@ -1695,6 +1949,99 @@ mod owned_cashflows_wire {
                 back.net_present_value(rate).unwrap().value(),
                 series.net_present_value(rate).unwrap().value(),
                 1e-6,
+            ));
+        }
+    }
+}
+
+/// The **dated** owned series' wire format (ADR-0065), on the same terms as the
+/// periodic one above: every series round-trips — any length, any finite offset, any
+/// finite amount, any currency — and the same float-exactness caveat applies, so the
+/// comparison is to within a few ULP. The extra gate is `std`/`libm`, which the dated
+/// types themselves need; the imports stay inside the module so no other feature
+/// configuration sees them.
+#[cfg(all(
+    feature = "serde",
+    feature = "alloc",
+    any(feature = "std", feature = "libm")
+))]
+mod owned_dated_cashflows_wire {
+    use super::close;
+    use proptest::prelude::*;
+    use time_value::{Annual, Currency, DatedCashflow, Money, OwnedDatedCashflows, Rate};
+
+    /// Relative closeness, for comparing a value with its round-tripped self.
+    fn close_relative(a: f64, b: f64) -> bool {
+        let scale = if a < 0.0 { -a } else { a };
+        close(a, b, 8.0 * f64::EPSILON * scale + f64::MIN_POSITIVE)
+    }
+
+    proptest! {
+        /// Serializing a dated series and deserializing the result recovers it: the
+        /// same flows, in the same order — which matters here, since the first entry is
+        /// the XNPV's valuation reference — each offset and amount back to within the
+        /// deserializer's float precision, and the currency exactly.
+        #[test]
+        fn serializing_then_deserializing_recovers_the_dated_series(
+            spec in prop::collection::vec((-1e12f64..1e12, -50.0f64..50.0), 0..=32),
+            currency_index in 0usize..Currency::ALL.len(),
+        ) {
+            let currency = Currency::ALL[currency_index];
+            let series = OwnedDatedCashflows::new(
+                spec.iter()
+                    .map(|&(amount, offset)| {
+                        DatedCashflow::new(offset, Money::new(amount, currency).unwrap()).unwrap()
+                    })
+                    .collect(),
+            );
+
+            let document = serde_json::to_string(&series).unwrap();
+            let back: OwnedDatedCashflows = serde_json::from_str(&document).unwrap();
+
+            prop_assert_eq!(back.len(), series.len());
+            for (recovered, original) in back.as_slice().iter().zip(series.as_slice()) {
+                prop_assert_eq!(recovered.amount().currency(), original.amount().currency());
+                prop_assert!(close_relative(
+                    recovered.amount().value(),
+                    original.amount().value(),
+                ));
+                prop_assert!(close_relative(
+                    recovered.offset_years(),
+                    original.offset_years(),
+                ));
+            }
+        }
+
+        /// Round-tripping preserves the *behaviour*, not just the data: the series off
+        /// the wire discounts to the same XNPV and compounds to the same XNFV.
+        #[test]
+        fn a_round_tripped_dated_series_values_the_same(
+            spec in prop::collection::vec((-1e6f64..1e6, 0.0f64..5.0), 1..=16),
+            rate in 0.0f64..0.5,
+        ) {
+            let series = OwnedDatedCashflows::new(
+                spec.iter()
+                    .map(|&(amount, offset)| {
+                        DatedCashflow::new(offset, Money::agnostic(amount).unwrap()).unwrap()
+                    })
+                    .collect(),
+            );
+            let back: OwnedDatedCashflows =
+                serde_json::from_str(&serde_json::to_string(&series).unwrap()).unwrap();
+
+            let rate = Rate::<Annual>::new(rate).unwrap();
+            // Up to 16 addends of |·| ≤ 1e6, offsets within a five-year window, so the
+            // largest amount either operation can produce is 16e6·(1 + r)⁵.
+            let scale = 16e6 * (1.0 + rate.value()).powf(5.0);
+            prop_assert!(close(
+                back.net_present_value(rate).unwrap().value(),
+                series.net_present_value(rate).unwrap().value(),
+                1e-9 * scale,
+            ));
+            prop_assert!(close(
+                back.net_future_value(rate).unwrap().value(),
+                series.net_future_value(rate).unwrap().value(),
+                1e-9 * scale,
             ));
         }
     }

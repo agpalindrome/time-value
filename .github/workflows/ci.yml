@@ -89,6 +89,15 @@ jobs:
       - name: Clippy (no_std + schemars)
         run: nix develop -c cargo clippy -p time_value --no-default-features --features schemars --all-targets -- -D warnings
 
+      # The *dated* owned series' wire impls need `alloc` **and** a transcendental-math
+      # feature (the dated types are behind std/libm), so no configuration above builds
+      # them without `std`: the two lines just above stop short of libm, and
+      # --all-features brings std in. This is the graph a downstream no_std consumer of
+      # the dated wire format gets (ADR-0065). Lib-only for ADR-0060's reason — the
+      # test targets' `serde_json` would enable `serde/std` and mask a std-only path.
+      - name: Clippy (no_std + alloc + libm + serde + schemars, lib only)
+        run: nix develop -c cargo clippy -p time_value --no-default-features --features alloc,libm,serde,schemars -- -D warnings
+
       # `--all-features` so feature-gated operations (and their tests) are
       # exercised, not just compiled.
       - name: Test

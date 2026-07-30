@@ -16,6 +16,10 @@
 //!   [`Money`] in period order — like the newtypes above, its periodicity tag is
 //!   not on the wire (ADR-0060), so a series does not record its own periodicity
 //!   and the `P` a caller deserializes into is the `P` they get.
+//!   `OwnedDatedCashflows` (behind `alloc` + std/libm) is the dated sibling: a bare
+//!   array of [`DatedCashflow`], each carrying its own year-offset, in slice order —
+//!   which is meaningful, since the first entry is the XNPV's valuation reference
+//!   (ADR-0065). It has no periodicity tag to omit.
 //! - **Structs / strings.** [`Money`] is `{ amount, currency }` (the currency is
 //!   *always* present — `"XXX"` for the agnostic amount — so it round-trips
 //!   losslessly), [`Currency`] is its ISO 4217 code string, and [`FxRate`],
@@ -53,6 +57,12 @@ use crate::OwnedCashflows;
 use crate::wire::DatedCashflowWire;
 #[cfg(any(feature = "std", feature = "libm"))]
 use crate::{ContinuousRate, DatedCashflow, Period};
+// The owned *dated* series needs both gates: `alloc` for its storage, std/libm for
+// the dated type itself.
+#[cfg(all(feature = "alloc", any(feature = "std", feature = "libm")))]
+use crate::wire::OwnedDatedCashflowsWire;
+#[cfg(all(feature = "alloc", any(feature = "std", feature = "libm")))]
+use crate::OwnedDatedCashflows;
 
 // ---- Bare-number newtypes -------------------------------------------------
 //
@@ -197,6 +207,31 @@ impl<'de, P: Periodicity> Deserialize<'de> for OwnedCashflows<P> {
         // constructor takes it from there.
         let wire = OwnedCashflowsWire::deserialize(deserializer)?;
         Ok(OwnedCashflows::new(wire.0.into_owned()))
+    }
+}
+
+// ---- OwnedDatedCashflows: a bare array of DatedCashflow --------------------
+//
+// The dated sibling of the block above. It needs no hand-written impl for a phantom
+// tag's sake — the dated series has no periodicity parameter (its discount is
+// intrinsically annual, ADR-0029) — but it is written the same way so the `Cow`
+// borrows on the way out.
+
+#[cfg(all(feature = "alloc", any(feature = "std", feature = "libm")))]
+impl Serialize for OwnedDatedCashflows {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        OwnedDatedCashflowsWire(alloc::borrow::Cow::Borrowed(self.as_slice())).serialize(serializer)
+    }
+}
+
+#[cfg(all(feature = "alloc", any(feature = "std", feature = "libm")))]
+impl<'de> Deserialize<'de> for OwnedDatedCashflows {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        // Each element is validated by `DatedCashflow`'s own impl above (a non-finite
+        // offset or amount fails the document); the series constructor, which is
+        // total, takes it from there.
+        let wire = OwnedDatedCashflowsWire::deserialize(deserializer)?;
+        Ok(OwnedDatedCashflows::new(wire.0.into_owned()))
     }
 }
 
