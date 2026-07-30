@@ -67,11 +67,12 @@
 //! The optional `serde` feature (off by default, `no_std`-compatible) derives
 //! `Serialize`/`Deserialize` for the public value types — bare numbers for the
 //! newtypes, `{ amount, currency }` for [`Money`], the ISO 4217 code for
-//! [`Currency`] — validating through the fallible constructors on the way in
-//! (`docs/adr/0042-serde-support.md`). The optional `schemars` feature (off by
-//! default, `no_std`-compatible, implies `alloc`) implements `JsonSchema` for
-//! those same types, describing the identical shapes
-//! (`docs/adr/0044-schemars-support.md`).
+//! [`Currency`], and (with `alloc`) a bare array of [`Money`] for
+//! [`OwnedCashflows`] — validating through the fallible constructors on the way in
+//! (`docs/adr/0042-serde-support.md`, `docs/adr/0060-owned-cashflows-on-the-wire.md`).
+//! The optional `schemars` feature (off by default, `no_std`-compatible, implies
+//! `alloc`) implements `JsonSchema` for those same types, describing the identical
+//! shapes (`docs/adr/0044-schemars-support.md`).
 //!
 //! ## Thread safety
 //!

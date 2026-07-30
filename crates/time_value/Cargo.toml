@@ -42,7 +42,13 @@ std = ["alloc"]
 # complements the borrowed, allocation-free `Cashflows` (ADR-0043). Off by
 # default so the core stays allocation-free; enabling it (or `std`) adds the
 # owned collection without pulling in `std`.
-alloc = []
+#
+# `serde?/alloc` is a *weak* dependency feature: it does not enable `serde`, but
+# when `serde` is also on it turns on serde's own `alloc` feature. The owned
+# series' wire form is a sequence (ADR-0060), and serde's `Vec`/`Cow` impls —
+# which that shape is built from — live behind serde's `alloc`. Without this a
+# downstream `features = ["alloc", "serde"]` build would fail to find them.
+alloc = ["serde?/alloc"]
 # `no_std` transcendental math (`powf`) via `libm`, so the single-sum and annuity
 # operations work without `std` (ADR-0009). The default build (NPV/NFV/IRR) is
 # arithmetic-only and needs neither `std` nor `libm`.

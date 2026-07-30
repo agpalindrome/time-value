@@ -120,6 +120,124 @@ fn installment_round_trips() {
     assert_eq!(back, installment);
 }
 
+// ---- OwnedCashflows: a bare array of Money --------------------------------
+//
+// Gated on `alloc` (the owned series' own gate) — `std`, which this file already
+// requires, implies it, but the gate says so rather than relying on that. The
+// imports sit inside each test so no other feature configuration sees them.
+
+/// The series is an array of `Money` in period order, and nothing else — no
+/// wrapper object, and no periodicity: the tag is a compile-time marker, so it is
+/// absent from the wire (ADR-0060).
+#[cfg(feature = "alloc")]
+#[test]
+fn owned_cashflows_is_a_bare_array_of_money() {
+    use time_value::OwnedCashflows;
+
+    let series = OwnedCashflows::<Monthly>::new(vec![
+        Money::new(-100.0, Currency::Usd).unwrap(),
+        Money::new(60.0, Currency::Usd).unwrap(),
+    ]);
+    assert_eq!(
+        to_value(&series).unwrap(),
+        json!([
+            {"amount": -100.0, "currency": "USD"},
+            {"amount": 60.0, "currency": "USD"},
+        ])
+    );
+    let back: OwnedCashflows<Monthly> =
+        from_str(r#"[{"amount":-100.0,"currency":"USD"},{"amount":60.0,"currency":"USD"}]"#)
+            .unwrap();
+    assert_eq!(back, series);
+}
+
+/// The periodicity is *not* on the wire, so one serialized series deserializes
+/// into whichever `P` the caller asks for — the deliberate trade ADR-0060 records:
+/// a mismatch is silent, exactly as it is for the bare-number `Rate<P>`.
+#[cfg(feature = "alloc")]
+#[test]
+fn the_periodicity_is_not_recorded_on_the_wire() {
+    use time_value::{Annual, OwnedCashflows};
+
+    let monthly = OwnedCashflows::<Monthly>::new(vec![Money::agnostic(1.0).unwrap()]);
+    let json = to_value(&monthly).unwrap();
+    // The same document reads back as an annual series, with no error to flag it.
+    let annual: OwnedCashflows<Annual> = serde_json::from_value(json.clone()).unwrap();
+    assert_eq!(annual.as_slice(), monthly.as_slice());
+    assert_eq!(to_value(&annual).unwrap(), json);
+}
+
+/// An empty series is an empty array, both ways round.
+#[cfg(feature = "alloc")]
+#[test]
+fn an_empty_series_round_trips_as_an_empty_array() {
+    use time_value::OwnedCashflows;
+
+    let empty = OwnedCashflows::<Monthly>::new(Vec::new());
+    assert_eq!(to_value(&empty).unwrap(), json!([]));
+    let back: OwnedCashflows<Monthly> = from_str("[]").unwrap();
+    assert_eq!(back, empty);
+    assert!(back.is_empty());
+}
+
+/// A series is only as valid as its elements: each one is rebuilt through
+/// [`Money`]'s validating impl, so a single bad element fails the whole document
+/// rather than materialising an invalid series.
+#[cfg(feature = "alloc")]
+#[test]
+fn one_invalid_element_rejects_the_whole_series() {
+    use time_value::OwnedCashflows;
+
+    // A non-finite amount — `1e999` overflows `f64` — must not become a `Money`.
+    assert!(from_str::<Money>(r#"{"amount":1e999,"currency":"USD"}"#).is_err());
+    assert!(from_str::<OwnedCashflows<Monthly>>(
+        r#"[{"amount":1.0,"currency":"USD"},{"amount":1e999,"currency":"USD"}]"#
+    )
+    .is_err());
+    // ...and the same for an unknown currency code mid-series.
+    assert!(from_str::<OwnedCashflows<Monthly>>(
+        r#"[{"amount":1.0,"currency":"USD"},{"amount":2.0,"currency":"ZZZ"}]"#
+    )
+    .is_err());
+}
+
+/// A deserialized series is a *working* series, not just a container: the
+/// operations that make it useful run on the value that came off the wire.
+#[cfg(feature = "alloc")]
+#[test]
+fn a_deserialized_series_computes() {
+    use time_value::OwnedCashflows;
+
+    let series: OwnedCashflows<Monthly> = from_str(
+        r#"[{"amount":-100.0,"currency":"XXX"},
+            {"amount":60.0,"currency":"XXX"},
+            {"amount":60.0,"currency":"XXX"}]"#,
+    )
+    .unwrap();
+    let npv = series
+        .net_present_value(Rate::<Monthly>::new(0.01).unwrap())
+        .unwrap();
+    assert!((npv.value() - 18.2237).abs() < 1e-3);
+}
+
+/// Mixed currencies are representable in process (`OwnedCashflows::new` accepts
+/// any `Vec<Money>`; the *operation* reports the mismatch), so the wire accepts
+/// them too — deserialization is exactly as permissive as the constructor, no more
+/// and no less (ADR-0060).
+#[cfg(feature = "alloc")]
+#[test]
+fn a_mixed_currency_series_deserializes_and_fails_at_the_operation() {
+    use time_value::OwnedCashflows;
+
+    let series: OwnedCashflows<Monthly> =
+        from_str(r#"[{"amount":-100.0,"currency":"USD"},{"amount":60.0,"currency":"EUR"}]"#)
+            .unwrap();
+    assert!(series.currency().is_err());
+    assert!(series
+        .net_present_value(Rate::<Monthly>::new(0.01).unwrap())
+        .is_err());
+}
+
 // ---- Deserialization validates: an out-of-domain value is an error ---------
 
 #[test]

@@ -12,6 +12,10 @@
 //!   on the wire (ADR-0019's original intent). The impls are hand-written so the
 //!   phantom parameter `P` does not pick up a spurious `Serialize`/`Deserialize`
 //!   bound.
+//! - **Sequences.** `OwnedCashflows<P>` (behind `alloc`) is a bare array of
+//!   [`Money`] in period order — like the newtypes above, its periodicity tag is
+//!   not on the wire (ADR-0060), so a series does not record its own periodicity
+//!   and the `P` a caller deserializes into is the `P` they get.
 //! - **Structs / strings.** [`Money`] is `{ amount, currency }` (the currency is
 //!   *always* present — `"XXX"` for the agnostic amount — so it round-trips
 //!   losslessly), [`Currency`] is its ISO 4217 code string, and [`FxRate`],
@@ -24,7 +28,11 @@
 //! so an out-of-domain number or an unknown currency code is a deserialization
 //! error, not a silently-constructed invalid value. This is the whole reason the
 //! newtypes cannot use a naive `#[serde(transparent)]` derive, which would bypass
-//! the check.
+//! the check. For the sequence the check is **element-wise**: every element is a
+//! [`Money`] deserialized through [`Money::new`], so one bad element fails the whole
+//! series — while the series constructor itself accepts any `Vec<Money>`, so
+//! deserialization is exactly as permissive as building the value in process, no
+//! more and no less.
 
 use core::fmt;
 
@@ -33,6 +41,11 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::wire::{FxRateWire, InstallmentWire, MoneyWire};
 use crate::{amortization::Installment, Currency, FxRate, Money, Periodicity, Rate};
+// The owned series and its wire form live behind `alloc`.
+#[cfg(feature = "alloc")]
+use crate::wire::OwnedCashflowsWire;
+#[cfg(feature = "alloc")]
+use crate::OwnedCashflows;
 // `Period`, `ContinuousRate`, and `DatedCashflow` live in modules gated behind
 // `std`/`libm` (they need transcendental math), so they do not exist in a pure
 // `no_std` build — their serde impls carry the same gate.
@@ -158,6 +171,32 @@ impl<'de> Deserialize<'de> for DatedCashflow {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let wire = DatedCashflowWire::deserialize(deserializer)?;
         DatedCashflow::new(wire.offset_years, wire.amount).map_err(DeError::custom)
+    }
+}
+
+// ---- OwnedCashflows: a bare array of Money, no periodicity on the wire -----
+//
+// The impls are hand-written for the same reason the newtypes' are: the phantom
+// tag `P` must not pick up a spurious `Serialize`/`Deserialize` bound. Only the
+// *owned* series gets them — the borrowing `Cashflows<'a, P>` has no storage to
+// deserialize into, and `Schedule<P>` is a lazy iterator whose position is not a
+// value anyone means to send (ADR-0060).
+
+#[cfg(feature = "alloc")]
+impl<P: Periodicity> Serialize for OwnedCashflows<P> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        // Borrowed, so serializing does not copy the series.
+        OwnedCashflowsWire(alloc::borrow::Cow::Borrowed(self.as_slice())).serialize(serializer)
+    }
+}
+
+#[cfg(feature = "alloc")]
+impl<'de, P: Periodicity> Deserialize<'de> for OwnedCashflows<P> {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        // Each element is validated by `Money`'s own impl above; the series
+        // constructor takes it from there.
+        let wire = OwnedCashflowsWire::deserialize(deserializer)?;
+        Ok(OwnedCashflows::new(wire.0.into_owned()))
     }
 }
 

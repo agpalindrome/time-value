@@ -60,9 +60,9 @@ the old one **Superseded** (link both ways) — don't rewrite the old one.
 | [0039](0039-typed-output-layer-for-the-binaries.md) | A typed output layer for the binaries — "types in, types out" | Accepted (MCP `CurrencyCode` workaround retired by 0044) |
 | [0040](0040-fx-convert-in-the-binaries.md) | FX convert in the binaries — a standalone `convert` surface | Accepted |
 | [0041](0041-continuous-compounding-in-the-binaries.md) | Continuous compounding in the binaries — a `continuous` family | Accepted |
-| [0042](0042-serde-support.md) | `serde` support — an optional, validating wire format | Accepted (amends 0019) |
-| [0043](0043-owned-cashflows.md) | Owned cashflows — `OwnedCashflows` behind an `alloc` feature | Accepted |
-| [0044](0044-schemars-support.md) | `schemars` support — JsonSchema companion to the serde wire format | Accepted |
+| [0042](0042-serde-support.md) | `serde` support — an optional, validating wire format | Accepted (amends 0019; amended by 0060) |
+| [0043](0043-owned-cashflows.md) | Owned cashflows — `OwnedCashflows` behind an `alloc` feature | Accepted (amended by 0060) |
+| [0044](0044-schemars-support.md) | `schemars` support — JsonSchema companion to the serde wire format | Accepted (extended by 0060) |
 | [0045](0045-make-illegal-states-unrepresentable.md) | Make illegal states unrepresentable; test the class, not the instance | Accepted |
 | [0046](0046-thread-safety-of-the-public-types.md) | The public value types are thread-safe (`Send + Sync`), locked by a test | Accepted |
 | [0047](0047-shared-disciplines-across-the-sibling-rust-mcp-repos.md) | Shared disciplines across the sibling Rust MCP repos — a cross-repo index | Accepted |
@@ -78,3 +78,4 @@ the old one **Superseded** (link both ways) — don't rewrite the old one.
 | [0057](0057-currency-is-checked-where-a-result-is-denominated.md) | Currency is checked where a result is denominated — the rate solves do not fold it | Accepted (amends 0034) |
 | [0058](0058-money-display-carries-its-currency.md) | `Money`'s `Display` carries its currency — bare for `XXX`, magnitude then ISO code otherwise | Accepted (amends 0034) |
 | [0059](0059-the-finite-scalars-are-totally-ordered.md) | The finite-by-construction scalars are totally ordered (`Eq` + `Ord`), `Money` stays partial | Accepted (amends 0035, extends 0005) |
+| [0060](0060-owned-cashflows-on-the-wire.md) | `OwnedCashflows` on the wire — a bare array of `Money`, no periodicity | Accepted (amends 0042, 0043; extends 0044) |

@@ -88,6 +88,7 @@ Two standing rules; ADR-0045 has the full statement and rationale.
   nix develop -c cargo clippy -p time_value --no-default-features --features libm --all-targets -- -D warnings  # no_std + libm
   nix develop -c cargo clippy -p time_value --no-default-features --features serde --all-targets -- -D warnings # no_std + serde
   nix develop -c cargo clippy -p time_value --no-default-features --features alloc,libm --all-targets -- -D warnings # no_std + alloc (owned)
+  nix develop -c cargo clippy -p time_value --no-default-features --features alloc,serde -- -D warnings # no_std + alloc + serde, LIB ONLY (ADR-0060)
   nix develop -c cargo clippy -p time_value --no-default-features --features schemars --all-targets -- -D warnings # no_std + schemars
   nix develop -c cargo nextest run --workspace --all-features
   nix develop -c cargo test --doc --workspace --all-features                        # doctests
@@ -115,6 +116,13 @@ Two standing rules; ADR-0045 has the full statement and rationale.
   zero-dep core (catching an accidental `std` dependency), and `--all-features`
   exercises the feature-gated operations and their tests. Doctests are run
   separately because `nextest` does not run them.
+
+  The `alloc,serde` clippy line is **deliberately lib-only — do not add
+  `--all-targets`** (ADR-0060). Any build that includes the test targets pulls the
+  `serde_json` dev-dependency, which enables `serde/std` and so masks a missing
+  `serde/alloc`; `--all-features` masks it the same way. Lib-only is the dependency
+  graph a downstream `features = ["alloc", "serde"]` user gets, and the only
+  configuration that proves the `alloc = ["serde?/alloc"]` weak feature is present.
 
 - `nix flake check` now only validates the pre-commit hook set (the crane build
   checks were retired when CI moved to `nix develop -c cargo …`).

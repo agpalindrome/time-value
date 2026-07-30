@@ -396,6 +396,18 @@ impl<P: Periodicity> Cashflows<'_, P> {
 /// below forward to it, so there is a single source of truth for the math. (A new
 /// operation added to [`Cashflows`] should gain a one-line forward here too.)
 ///
+/// # Wire format
+///
+/// With the `serde` / `schemars` features this is the series type that crosses a
+/// wire boundary — the borrowed [`Cashflows`] cannot, having no storage to
+/// deserialize into. The shape is a **bare array of [`Money`]** in period order, and
+/// the periodicity tag is *not* on the wire, exactly as it is absent from
+/// [`Rate`]'s. So a serialized series does not record its own periodicity, and
+/// deserializing one into the wrong `P` succeeds silently — a deliberate trade
+/// (`docs/adr/0060-owned-cashflows-on-the-wire.md`): the tag is a compile-time
+/// marker with no runtime data, and the periodicity of a document is the caller's
+/// context, not the document's content.
+///
 /// # Examples
 ///
 /// ```

@@ -40,6 +40,21 @@ pub(crate) struct DatedCashflowWire {
     pub(crate) amount: Money,
 }
 
+/// `OwnedCashflows` → a bare JSON **array** of `Money` in period order; the
+/// periodicity tag is a compile-time marker and is not on the wire (ADR-0060).
+/// Gated with its type (`alloc`).
+///
+/// The only sequence wire type, and the only one that is a *newtype*: both derives
+/// see straight through it to the inner sequence (serde serializes a newtype struct
+/// as its field; schemars derives the field's schema), so the shape stays "an array
+/// of `Money`" while the two descriptions still come from one declaration. The
+/// `Cow` is what lets that single declaration serve both directions — borrowed on
+/// the way out, so serializing a series copies nothing, and owned on the way in.
+#[cfg(feature = "alloc")]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+pub(crate) struct OwnedCashflowsWire<'a>(pub(crate) alloc::borrow::Cow<'a, [Money]>);
+
 /// `Installment` → `{ period, payment, interest, principal, balance }`.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
