@@ -171,6 +171,74 @@ fn annuity_growing_tools() {
         .stdout(predicate::str::contains("1386.7"));
 }
 
+/// The sinking-fund payment and the perpetuity-due forms (ADR-0062).
+#[test]
+fn annuity_sinking_fund_and_perpetuity_due_tools() {
+    let calls = concat!(
+        // 12 contributions reaching 1268.25 at 1%/month -> ~100 each.
+        r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"annuity_payment","arguments":{"rate":0.01,"periods":12,"future":1268.250}}}"#,
+        "\n",
+        // The same contribution reaches the larger start-of-period total.
+        r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"annuity_due_payment","arguments":{"rate":0.01,"periods":12,"future":1280.933}}}"#,
+        "\n",
+        // 100/0.05 × 1.05 = 2100.
+        r#"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"annuity_due_perpetuity","arguments":{"rate":0.05,"payment":100}}}"#,
+        "\n",
+        // 100/(0.05 − 0.02) × 1.05 = 3500.
+        r#"{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"annuity_growing_due_perpetuity","arguments":{"rate":0.05,"growth":0.02,"payment":100}}}"#,
+        "\n",
+    );
+
+    Command::cargo_bin("time-value-mcp")
+        .unwrap()
+        .write_stdin(session(calls))
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("99.99").or(predicate::str::contains("100.0")))
+        .stdout(predicate::str::contains("2100"))
+        .stdout(predicate::str::contains("3500"));
+}
+
+/// The `annuity_payment` tools take the same mutually-exclusive anchor the solves
+/// do, so omitting both is an `invalid_params` error rather than a wrong answer.
+#[test]
+fn annuity_payment_requires_exactly_one_anchor() {
+    let calls = concat!(
+        r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"annuity_payment","arguments":{"rate":0.01,"periods":12}}}"#,
+        "\n",
+        r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"annuity_due_payment","arguments":{"rate":0.01,"periods":12,"present":1000,"future":1268.25}}}"#,
+        "\n",
+    );
+
+    Command::cargo_bin("time-value-mcp")
+        .unwrap()
+        .write_stdin(session(calls))
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("present").or(predicate::str::contains("future")))
+        .stdout(predicate::str::contains("mutually exclusive"));
+}
+
+/// A perpetuity-due diverges on exactly the ordinary perpetuity's condition:
+/// bringing every payment forward one period rescales a convergent sum, it does not
+/// make a divergent one converge.
+#[test]
+fn the_perpetuity_due_tools_reject_divergence() {
+    let calls = concat!(
+        r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"annuity_due_perpetuity","arguments":{"rate":0,"payment":100}}}"#,
+        "\n",
+        r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"annuity_growing_due_perpetuity","arguments":{"rate":0.02,"growth":0.05,"payment":100}}}"#,
+        "\n",
+    );
+
+    Command::cargo_bin("time-value-mcp")
+        .unwrap()
+        .write_stdin(session(calls))
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("diverges"));
+}
+
 #[test]
 fn annuity_periods_requires_exactly_one_anchor() {
     let calls = concat!(

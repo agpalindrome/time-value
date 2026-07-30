@@ -33,7 +33,7 @@ the old one **Superseded** (link both ways) — don't rewrite the old one.
 | [0012](0012-ci-and-release-automation.md) | CI and release automation | Accepted |
 | [0013](0013-core-api-values-and-discrete-operations.md) | Core API — values, cashflows & discrete operations | Accepted (amended by 0020, 0021, 0026) |
 | [0014](0014-transcendental-single-sum-operations.md) | Transcendental operations behind `std`/`libm` — single-sum value | Accepted (amended by 0019, 0021, 0025) |
-| [0015](0015-annuities.md) | Annuities — convention, the `r → 0` limit, and a fallible payment | Accepted (amended by 0021, 0025; extended 2026-07-10 — annuity-due & perpetuity) |
+| [0015](0015-annuities.md) | Annuities — convention, the `r → 0` limit, and a fallible payment | Accepted (amended by 0021, 0025, 0062; extended 2026-07-10 — annuity-due & perpetuity) |
 | [0016](0016-msrv-and-toolchain-bump.md) | Toolchain & MSRV bump to 1.88 for the MCP server | Accepted (amended by 0017) |
 | [0017](0017-per-crate-msrv-core-1.85.md) | Per-crate MSRV — the core keeps 1.85, verified separately | Accepted |
 | [0018](0018-kebab-case-binary-crate-names.md) | Kebab-case binary crate names | Accepted |
@@ -43,10 +43,10 @@ the old one **Superseded** (link both ways) — don't rewrite the old one.
 | [0022](0022-core-first-sequencing-before-the-first-release.md) | Core-first sequencing before the first release | Accepted |
 | [0023](0023-money-arithmetic-surface.md) | The `Money` arithmetic surface — `Neg` and `try_*` | Accepted (amended by 0061) |
 | [0024](0024-rate-conversions-effective-and-nominal.md) | Rate conversions — effective between periodicities, nominal as a quote | Accepted |
-| [0025](0025-solve-for-periods-and-rate.md) | Solve for periods (NPER) and rate (RATE) | Accepted |
+| [0025](0025-solve-for-periods-and-rate.md) | Solve for periods (NPER) and rate (RATE) | Accepted (amended by 0056, 0062) |
 | [0026](0026-modified-internal-rate-of-return.md) | Modified internal rate of return (MIRR) | Accepted |
 | [0027](0027-amortization-schedule.md) | Amortization schedule as a lazy iterator | Accepted (amended by 0051, 0054) |
-| [0028](0028-binary-surface-conventions.md) | Binary surface conventions (CLI grammar & MCP tools) | Accepted |
+| [0028](0028-binary-surface-conventions.md) | Binary surface conventions (CLI grammar & MCP tools) | Accepted (its §4/§5 output shape amended by 0039; extended by 0049, 0062) |
 | [0029](0029-dated-cashflows-xnpv-xirr.md) | Dated cashflows — XNPV / XIRR | Accepted (amended by 0030) |
 | [0030](0030-shared-day-count-support-crate.md) | Shared day-count support crate | Accepted |
 | [0031](0031-split-non-finite-result-into-overflow-and-undefined.md) | Split `NonFiniteResult` into `Overflow` and `Undefined` | Accepted |
@@ -67,7 +67,7 @@ the old one **Superseded** (link both ways) — don't rewrite the old one.
 | [0046](0046-thread-safety-of-the-public-types.md) | The public value types are thread-safe (`Send + Sync`), locked by a test | Accepted |
 | [0047](0047-shared-disciplines-across-the-sibling-rust-mcp-repos.md) | Shared disciplines across the sibling Rust MCP repos — a cross-repo index | Accepted |
 | [0048](0048-finite-growing-annuity.md) | The finite growing annuity | Accepted |
-| [0049](0049-growing-annuity-in-the-binaries.md) | The growing annuity in the binaries | Accepted |
+| [0049](0049-growing-annuity-in-the-binaries.md) | The growing annuity in the binaries | Accepted (extended by 0062) |
 | [0050](0050-role-newtypes-for-ambiguous-arguments.md) | Role newtypes for transposable arguments | Accepted (extends 0005) |
 | [0051](0051-installment-private-fields.md) | `Installment`'s fields are private, read through accessors | Accepted (amends 0027) |
 | [0052](0052-tvmerror-variant-granularity.md) | `TvmError` variant granularity — a payload on `CurrencyMismatch`, `Undefined` split | Accepted (amends 0004, 0031; extended by 0061) |
@@ -80,3 +80,4 @@ the old one **Superseded** (link both ways) — don't rewrite the old one.
 | [0059](0059-the-finite-scalars-are-totally-ordered.md) | The finite-by-construction scalars are totally ordered (`Eq` + `Ord`), `Money` stays partial | Accepted (amends 0035, extends 0005) |
 | [0060](0060-owned-cashflows-on-the-wire.md) | `OwnedCashflows` on the wire — a bare array of `Money`, no periodicity | Accepted (amends 0042, 0043; extends 0044) |
 | [0061](0061-money-and-currency-ergonomics.md) | `Money`/`Currency` ergonomics — `try_sum` not `Sum`, fallible `min`/`max`, infallible sign, lenient `FromStr` | Accepted (amends 0023, 0032; extends 0052) |
+| [0062](0062-annuity-sinking-fund-and-perpetuity-due.md) | The sinking-fund payment and the perpetuity-due | Accepted (amends 0015, 0025; extends 0028, 0049) |

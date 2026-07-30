@@ -74,15 +74,17 @@ finance and reinvestment rates), and `xnpv`/`xirr` (cashflows on irregular ISO \
 dates, at an annual rate). Single sum: `single_sum_present_value`, \
 `single_sum_future_value`, and the solves `single_sum_periods` (NPER) / \
 `single_sum_rate` (RATE). Annuity: `annuity_present_value`, \
-`annuity_future_value`, `annuity_payment`, the solves `annuity_periods` / \
-`annuity_rate` (each from a present or future value), `annuity_perpetuity`, \
+`annuity_future_value`, the solves `annuity_payment` / `annuity_periods` / \
+`annuity_rate` (each from a present or future value — `annuity_payment` from a \
+future value is the sinking-fund payment), `annuity_perpetuity`, \
 `annuity_growing_perpetuity`, the finite growing forms \
 `annuity_growing_present_value` / `annuity_growing_future_value` (a payment that \
 grows each period; unlike a perpetuity, the rate need not exceed the growth), and \
 the annuity-due forms `annuity_due_present_value`, `annuity_due_future_value`, \
-`annuity_due_payment`. The growing forms carry a `growing` prefix throughout: \
-`annuity_growing_present_value`, `annuity_growing_future_value`, \
-`annuity_growing_due_present_value`, `annuity_growing_due_future_value`. \
+`annuity_due_payment`, `annuity_due_perpetuity`. The growing forms carry a \
+`growing` prefix throughout: `annuity_growing_present_value`, \
+`annuity_growing_future_value`, `annuity_growing_due_present_value`, \
+`annuity_growing_due_future_value`, `annuity_growing_due_perpetuity`. \
 Rate conversions: `rate_effective_annual` (EAR), `rate_convert` (between \
 periodicities), `rate_from_nominal` and `rate_nominal` (nominal/APR) — each takes \
 a periodicity (daily, weekly, monthly, quarterly, semi-annual, annual). \
@@ -322,19 +324,18 @@ impl TimeValueServer {
 
     #[tool(
         name = "annuity_payment",
-        description = "The level end-of-period payment that amortises a present value over a number of periods at a per-period rate."
+        description = "The level end-of-period payment for a number of periods at a per-period rate, from a present value (amortising a balance) or a future value (the sinking-fund payment, i.e. how much to set aside each period to reach a target). Provide exactly one."
     )]
     fn annuity_payment(
         &self,
         Parameters(input): Parameters<AnnuityPaymentInput>,
     ) -> Result<Json<MoneyResult>, ErrorData> {
         let currency = resolve_currency(input.currency);
-        let payment = annuity::payment(
-            rate(input.rate)?,
-            period(input.periods)?,
-            money(input.present, currency)?,
-        )
-        .map_err(tvm)?;
+        let payment = level_payment(
+            &input,
+            currency,
+            (annuity::payment, annuity::payment_from_future),
+        )?;
         Ok(Json(payment.into()))
     }
 
@@ -490,20 +491,33 @@ impl TimeValueServer {
 
     #[tool(
         name = "annuity_due_payment",
-        description = "The level start-of-period payment that amortises a present value over a number of periods at a per-period rate."
+        description = "The level start-of-period payment for a number of periods at a per-period rate, from a present value (amortising a balance) or a future value (the sinking-fund payment). Provide exactly one."
     )]
     fn annuity_due_payment(
         &self,
         Parameters(input): Parameters<AnnuityPaymentInput>,
     ) -> Result<Json<MoneyResult>, ErrorData> {
         let currency = resolve_currency(input.currency);
-        let payment = annuity::due::payment(
-            rate(input.rate)?,
-            period(input.periods)?,
-            money(input.present, currency)?,
-        )
-        .map_err(tvm)?;
+        let payment = level_payment(
+            &input,
+            currency,
+            (annuity::due::payment, annuity::due::payment_from_future),
+        )?;
         Ok(Json(payment.into()))
+    }
+
+    #[tool(
+        name = "annuity_due_perpetuity",
+        description = "Present value of a level perpetuity-due — a fixed payment at the START of every period forever, so the first payment is not discounted — at a per-period rate (which must exceed 0). The ordinary perpetuity scaled by (1 + rate)."
+    )]
+    fn annuity_due_perpetuity(
+        &self,
+        Parameters(input): Parameters<PerpetuityInput>,
+    ) -> Result<Json<MoneyResult>, ErrorData> {
+        let currency = resolve_currency(input.currency);
+        let money = annuity::due::perpetuity(rate(input.rate)?, money(input.payment, currency)?)
+            .map_err(tvm)?;
+        Ok(Json(money.into()))
     }
 
     #[tool(
@@ -538,6 +552,24 @@ impl TimeValueServer {
             rate(input.rate)?,
             Growth(rate(input.growth)?),
             period(input.periods)?,
+            money(input.payment, currency)?,
+        )
+        .map_err(tvm)?;
+        Ok(Json(money.into()))
+    }
+
+    #[tool(
+        name = "annuity_growing_due_perpetuity",
+        description = "Present value of a growing perpetuity-due — a payment at the START of every period forever, growing each period, so the first payment is not discounted — at a per-period rate that must exceed the growth rate."
+    )]
+    fn annuity_growing_due_perpetuity(
+        &self,
+        Parameters(input): Parameters<GrowingPerpetuityInput>,
+    ) -> Result<Json<MoneyResult>, ErrorData> {
+        let currency = resolve_currency(input.currency);
+        let money = annuity::due::growing_perpetuity(
+            rate(input.rate)?,
+            Growth(rate(input.growth)?),
             money(input.payment, currency)?,
         )
         .map_err(tvm)?;
@@ -787,6 +819,27 @@ fn cashflows(values: &[f64], currency: Currency) -> Result<Vec<Money>, ErrorData
 enum Anchor {
     Present(f64),
     Future(f64),
+}
+
+/// A core solve for the level payment: from a present value (amortisation) or from
+/// a future one (a sinking fund). Both signatures are identical, which is what lets
+/// one helper serve the `annuity_payment` and `annuity_due_payment` tools alike.
+type PaymentSolve = fn(Rate<Monthly>, Period<Monthly>, Money) -> Result<Money, TvmError>;
+
+/// Solve the level payment from whichever value the caller anchored to — the same
+/// mutually-exclusive `present` / `future` pair `annuity_periods` and `annuity_rate`
+/// already take (ADR-0028 §2, ADR-0062).
+fn level_payment(
+    input: &AnnuityPaymentInput,
+    currency: Currency,
+    (from_present, from_future): (PaymentSolve, PaymentSolve),
+) -> Result<Money, ErrorData> {
+    let (rate, periods) = (rate(input.rate)?, period(input.periods)?);
+    match anchor(input.present, input.future)? {
+        Anchor::Present(p) => from_present(rate, periods, money(p, currency)?),
+        Anchor::Future(f) => from_future(rate, periods, money(f, currency)?),
+    }
+    .map_err(tvm)
 }
 
 fn anchor(present: Option<f64>, future: Option<f64>) -> Result<Anchor, ErrorData> {

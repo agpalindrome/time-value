@@ -533,6 +533,134 @@ proptest! {
         prop_assert!(close(recovered.value(), payment.value(), 1e-6 * payment.value()));
     }
 
+    /// The **sinking-fund** payment inverts the annuity *future* value: compounding
+    /// a contribution stream forward then asking what contribution reaches that
+    /// total recovers the contribution (ADR-0062).
+    ///
+    /// The tolerance is derived, not chosen. The round trip multiplies by the
+    /// future-value factor `s(r, n)` and then divides by the *identical* factor —
+    /// the same private helper, at the same arguments — so the only error is the
+    /// rounding of those two `f64` operations, about two ULP or `4.5e-16`
+    /// relative. Nothing amplifies it: `s ≥ 1` for every `n ≥ 1` and every rate
+    /// above `−100%` (it is exactly `1` at `n = 1` and rises with `n`), so the
+    /// division cannot magnify the multiplication's error. `1e-9` relative is that
+    /// bound with six orders of margin.
+    #[test]
+    fn annuity_payment_from_future_inverts_future_value(
+        payment in 1.0f64..1e5,
+        rate in -0.9f64..1.0,
+        periods in 1.0f64..120.0,
+    ) {
+        use time_value::{annuity, Period};
+
+        let rate = Rate::<Monthly>::new(rate).unwrap();
+        // At least one period, so the factor is non-zero and the solve is defined.
+        let periods = Period::new(periods).unwrap();
+        let payment = Money::agnostic(payment).unwrap();
+
+        let future = annuity::future_value(rate, periods, payment).unwrap();
+        let recovered = annuity::payment_from_future(rate, periods, future).unwrap();
+        prop_assert!(close(recovered.value(), payment.value(), 1e-9 * payment.value()));
+    }
+
+    /// The same inverse relationship for the annuity-due sinking fund. The extra
+    /// `(1 + r)` appears on both sides and cancels, so the tolerance argument above
+    /// carries over unchanged.
+    #[test]
+    fn due_payment_from_future_inverts_due_future_value(
+        payment in 1.0f64..1e5,
+        rate in -0.9f64..1.0,
+        periods in 1.0f64..120.0,
+    ) {
+        use time_value::{annuity, Period};
+
+        let rate = Rate::<Monthly>::new(rate).unwrap();
+        let periods = Period::new(periods).unwrap();
+        let payment = Money::agnostic(payment).unwrap();
+
+        let future = annuity::due::future_value(rate, periods, payment).unwrap();
+        let recovered = annuity::due::payment_from_future(rate, periods, future).unwrap();
+        prop_assert!(close(recovered.value(), payment.value(), 1e-9 * payment.value()));
+    }
+
+    /// Over a single period the future-value factor is exactly `1` for **every**
+    /// rate — the one payment falls at the end of the term and never compounds — so
+    /// the sinking-fund payment is the target itself, whatever the rate. This is the
+    /// `n = 1` row of ADR-0056's constancy table, read from the well-posed side: the
+    /// rate being absent from the equation makes `rate_from_future` indeterminate,
+    /// but leaves the payment perfectly determined.
+    ///
+    /// The tolerance is derived. `1` is the factor's *algebraic* value, not its
+    /// floating-point one: it is computed as `expm1(1·ln1p(r)) / r`, and
+    /// `expm1 ∘ ln1p` is not bit-exactly the identity — one ULP from each leaves the
+    /// factor within a few ULP of `1`, so the payment lands within about `4e-16`
+    /// relative of the target rather than on it. (An exact `==` assertion was tried
+    /// first and fails, e.g. at `r = 7.18`.) `1e-12` relative is that bound with
+    /// three orders of margin, and still four orders tighter than any real
+    /// discrepancy in the formula would be.
+    #[test]
+    fn a_single_period_sinking_fund_is_its_target(
+        target in 1.0f64..1e6,
+        rate in -0.99f64..10.0,
+    ) {
+        use time_value::{annuity, Period};
+
+        let rate = Rate::<Monthly>::new(rate).unwrap();
+        let one = Period::new(1.0).unwrap();
+        let target = Money::agnostic(target).unwrap();
+
+        let payment = annuity::payment_from_future(rate, one, target).unwrap();
+        prop_assert!(close(payment.value(), target.value(), 1e-12 * target.value()));
+    }
+
+    /// Each perpetuity-due is its ordinary counterpart scaled by `(1 + r)`, the same
+    /// relationship every other pair in the [`annuity::due`] module obeys — and the
+    /// reason the due forms need no convergence rule of their own (ADR-0062).
+    ///
+    /// Generated as a growth plus a strictly positive spread, so the ordinary
+    /// perpetuity converges and the comparison is legal at all.
+    #[test]
+    fn perpetuity_due_is_the_ordinary_present_value_scaled_by_one_plus_the_rate(
+        payment in 1.0f64..1e5,
+        growth in -0.2f64..0.2,
+        spread in 0.01f64..0.5,
+    ) {
+        use time_value::{annuity, Growth};
+
+        let g = Growth(Rate::<Monthly>::new(growth).unwrap());
+        let rate = growth + spread;
+        let r = Rate::<Monthly>::new(rate).unwrap();
+        let payment = Money::agnostic(payment).unwrap();
+
+        let ordinary = annuity::growing_perpetuity(r, g, payment).unwrap().value();
+        let due = annuity::due::growing_perpetuity(r, g, payment).unwrap().value();
+        let scaled = ordinary * (1.0 + rate);
+        prop_assert!(close(due, scaled, 1e-9 * scaled.abs()));
+    }
+
+    /// As the term grows without bound the growing annuity-**due** approaches the
+    /// growing perpetuity-**due**, exactly as the ordinary pair does — the `(1 + r)`
+    /// scaling applies to both sides of that limit (ADR-0062). This ties the new
+    /// closed form to the finite annuity it is the limit of, independently of the
+    /// scaling property above.
+    #[test]
+    fn a_long_growing_annuity_due_approaches_the_growing_perpetuity_due(
+        payment in 1.0f64..1e5,
+        growth in -0.2f64..0.2,
+        spread in 0.01f64..0.5,
+    ) {
+        use time_value::{annuity, Growth, Period};
+
+        let g = Growth(Rate::<Monthly>::new(growth).unwrap());
+        let r = Rate::<Monthly>::new(growth + spread).unwrap();
+        let n = Period::new(2000.0).unwrap();
+        let payment = Money::agnostic(payment).unwrap();
+
+        let finite = annuity::due::growing_present_value(r, g, n, payment).unwrap().value();
+        let forever = annuity::due::growing_perpetuity(r, g, payment).unwrap().value();
+        prop_assert!(close(finite, forever, 1e-6 * forever));
+    }
+
     /// A periodicity conversion preserves economic value, so converting a monthly
     /// rate to annual and back recovers it (ADR-0024). The quantity compared is
     /// the *growth factor* `1 + r`, relative to its size.
