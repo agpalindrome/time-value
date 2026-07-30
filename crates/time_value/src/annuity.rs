@@ -18,7 +18,13 @@
 //! [`growing_present_value`] / [`growing_future_value`] and their [`due`]
 //! counterparts (ADR-0048). Unlike a growing perpetuity, a finite growing annuity
 //! converges for every rate and growth pair, so `r ≤ g` is priced rather than
-//! rejected; at `r = g` the factors take their limit, as they do at `r = 0`.
+//! rejected; at `r = g` the factors take their limit, as they do at `r = 0`. That
+//! present value is inverted for each of its other three unknowns by
+//! [`growing_payment`], [`growing_periods`], and [`growing_rate`] (ADR-0063).
+//!
+//! The solves come in pairs, one for each end of the horizon: [`periods`] /
+//! [`rate`] read a *present* value and [`periods_from_future`] /
+//! [`rate_from_future`] a *future* one, and [`due`] mirrors all four (ADR-0063).
 //!
 //! Every function takes an interest `rate`; the dated ones also take a number of
 //! `periods`. They are available with the `std` or `libm` feature, like the
@@ -718,23 +724,220 @@ pub fn rate_from_future<P: Periodicity>(
     // written against zero because that is the form the crate's `float_cmp` lint
     // permits; `n - 1.0 == 0.0` holds for exactly the finite `n` where `n == 1.0`.
     if periods.value() - 1.0 == 0.0 {
-        let priced = payment.money().value(); // the factor is exactly 1
-        let target = future.money().value();
-        let residual = Residual {
-            value: priced - target,
-            scale: abs(priced) + abs(target),
-        };
-        return Err(if residual.is_root() {
-            TvmError::IndeterminateRate
-        } else {
-            TvmError::NoRealSolution
-        });
+        return Err(unit_factor_outcome(
+            payment.money().value(),
+            future.money().value(),
+        ));
     }
     solve_rate(
         periods.value(),
         payment.money().value(),
         future.money().value(),
         future_value_factor,
+    )
+}
+
+/// The error a rate solve owes its caller when its factor is identically `1` over
+/// the whole rate domain, so the equation collapses to `payment = target` with `r`
+/// absent (ADR-0056, ADR-0063).
+///
+/// Two rows of the constancy table are of this shape: the *future*-value factor at
+/// `n = 1` (the lone payment falls at the end of the term and never compounds) and
+/// the *due present*-value factor at `n = 1` (the lone payment falls today and is
+/// never discounted). Either every rate satisfies the equation or none does, and
+/// which it is turns on that comparison alone.
+///
+/// "Satisfied" is [`Residual::is_root`], the solver's own test, not `==`: a target a
+/// hair from the payment still leaves a residual inside the accepted tolerance at
+/// *every* rate, so an exact-equality guard would let those near-misses go on
+/// leaking the bracketing scan's `−0.9999` sentinel. Sharing this helper is what
+/// keeps the guards and the solver from disagreeing about what counts as solved.
+fn unit_factor_outcome(payment: f64, target: f64) -> TvmError {
+    let residual = Residual {
+        value: payment - target, // the factor is exactly 1, so this *is* the residual
+        scale: abs(payment) + abs(target),
+    };
+    if residual.is_root() {
+        TvmError::IndeterminateRate
+    } else {
+        TvmError::NoRealSolution
+    }
+}
+
+/// The level payment, made at the end of the first period and growing at `growth`
+/// each period, whose present value at `rate` is `present` — the inverse of
+/// [`growing_present_value`] in the *payment* (ADR-0063).
+///
+/// `PMT = PV / f(r, g, n)`, where `f` is the growing present-value factor
+/// `(1 − ((1+g)/(1+r))ⁿ) / (r − g)`; at `r = g` that factor is `n / (1 + r)`. The
+/// answer is the **first** payment, so the `k`-th is `PMT · (1 + g)^(k−1)` — the
+/// convention every growing operation uses.
+///
+/// # Examples
+///
+/// ```
+/// use time_value::{annuity, Growth, Money, Monthly, Period, Rate};
+///
+/// // Amortise 979.318 with twelve payments escalating 2%/month, at 5%/month.
+/// let pmt = annuity::growing_payment(
+///     Rate::<Monthly>::new(0.05)?,
+///     Growth(Rate::new(0.02)?),
+///     Period::new(12.0)?,
+///     Money::agnostic(979.318)?,
+/// )?;
+/// assert!((pmt.value() - 100.0).abs() < 1e-3);
+/// # Ok::<(), time_value::TvmError>(())
+/// ```
+///
+/// # Errors
+///
+/// Returns [`TvmError::ZeroPeriods`] if `periods` is zero, so there is nothing to
+/// amortise over and the payment has no answer — the factor is `0` there, and *only*
+/// there. For every `n ≥ 1` the factor is strictly positive at every admissible
+/// rate and growth (each of its `n` terms is a positive discounted payment), so
+/// unlike the perpetuity there is no `r ≤ g` case to reject and no second division
+/// by zero (ADR-0063's table). [`TvmError::Overflow`] if the division overflows on
+/// extreme magnitudes (ADR-0021, ADR-0031).
+pub fn growing_payment<P: Periodicity>(
+    rate: Rate<P>,
+    growth: Growth<P>,
+    periods: Period<P>,
+    present: Money,
+) -> Result<Money, TvmError> {
+    if periods.value() == 0.0 {
+        // Nothing to amortise over: the factor is 0, so the payment is undefined
+        // rather than merely too large — as in `payment`.
+        return Err(TvmError::ZeroPeriods);
+    }
+    let factor = growing_present_value_factor(rate.value(), growth.value(), periods.value());
+    Money::from_operation(present.value() / factor, present.currency())
+}
+
+/// The number of payments — the first `payment`, each later one `(1 + growth)` times
+/// the last — that amortise a `present` value at `rate`: [`growing_present_value`]
+/// solved for `n` (ADR-0063).
+///
+/// `n = ln(1 − PV·(r − g) / PMT) / ln((1 + g)/(1 + r))`, or `n = PV·(1 + r) / PMT`
+/// when `r = g`. It is [`periods`] that is this operation's `g = 0` case.
+///
+/// Both logarithms are evaluated as `ln1p` of a quantity **proportional to the
+/// spread** `r − g` — `ln1p(−PV·spread/PMT) / ln1p(−spread/(1 + r))` — so the spread
+/// cancels between them instead of being lost to cancellation in a `1 − …`
+/// intermediate. That is ADR-0054's argument applied to a solve rather than a
+/// factor, and it is why this has no near-zero band around `r = g`: only the exact
+/// `0/0` is a special case, and its limit is taken there.
+///
+/// # Examples
+///
+/// ```
+/// use time_value::{annuity, Growth, Money, Monthly, Payment, PresentValue, Rate};
+///
+/// // How many payments starting at 100 and escalating 2%/month retire 979.318
+/// // at 5%/month? A year.
+/// let n = annuity::growing_periods(
+///     Rate::<Monthly>::new(0.05)?,
+///     Growth(Rate::new(0.02)?),
+///     Payment(Money::agnostic(100.0)?),
+///     PresentValue(Money::agnostic(979.318)?),
+/// )?;
+/// assert!((n.value() - 12.0).abs() < 1e-3);
+/// # Ok::<(), time_value::TvmError>(())
+/// ```
+///
+/// # Errors
+///
+/// [`TvmError::PaymentDoesNotAmortize`] if `PMT ≤ PV·(r − g)` — the growing
+/// counterpart of [`periods`]' condition, and the same variant. When the rate
+/// exceeds the growth the present value is capped by the [`growing_perpetuity`]
+/// value `PMT / (r − g)`, so a target at or above that cap is never reached by any
+/// finite number of payments; a zero payment likewise retires nothing. When the
+/// *growth* exceeds the rate there is no cap and every target is reachable.
+/// [`TvmError::NegativePeriods`] if the solved `n` is negative, or
+/// [`TvmError::Overflow`] if it is not finite.
+pub fn growing_periods<P: Periodicity>(
+    rate: Rate<P>,
+    growth: Growth<P>,
+    payment: Payment,
+    present: PresentValue,
+) -> Result<Period<P>, TvmError> {
+    let (payment, present) = (payment.money().value(), present.money().value());
+    if payment == 0.0 {
+        // Paying nothing retires nothing, at any rate or growth.
+        return Err(TvmError::PaymentDoesNotAmortize);
+    }
+    let (r, spread) = (rate.value(), rate.value() - growth.value());
+    let n = if spread == 0.0 {
+        // r = g: every payment discounts to the same amount, so the factor is
+        // n / (1 + r) and the term is exactly proportional to the balance.
+        present * (1.0 + r) / payment
+    } else {
+        let scaled = -present * spread / payment;
+        if scaled <= -1.0 || scaled.is_nan() {
+            // PMT ≤ PV·(r − g): the logarithm's argument is non-positive, so no
+            // finite number of payments retires the balance.
+            return Err(TvmError::PaymentDoesNotAmortize);
+        }
+        // `ln1p(−spread/(1 + r))` is `ln((1 + g)/(1 + r))` without forming the
+        // ratio, and is non-zero because the spread is.
+        ln_1p(scaled) / ln_1p(-spread / (1.0 + r))
+    };
+    Period::from_operation(n)
+}
+
+/// The per-period rate at which `periods` payments — the first `payment`, each later
+/// one `(1 + growth)` times the last — amortise a `present` value:
+/// [`growing_present_value`] solved for `r` (ADR-0063).
+///
+/// There is no closed form, so this solves iteratively with the same bracketing
+/// bisection as [`rate`], for the root of `PMT · f(r, g, n) − PV`. Unlike [`rate`]
+/// the periodicity needs no turbofish: [`Growth<P>`](Growth) already names it.
+///
+/// **The residual is monotone in `r` even though the factor depends on the spread.**
+/// Written as the sum it is — `f(r, g, n) = Σ (1 + g)^(k−1) · (1 + r)^(−k)` for
+/// `k = 1..=n` — every term is strictly decreasing in `r` with `g` held fixed, so
+/// the whole factor is, and the root is unique. Reading the closed form instead
+/// invites the opposite conclusion, because `r` appears in the spread as well as in
+/// the discount factor; the sum settles it.
+///
+/// # Examples
+///
+/// ```
+/// use time_value::{annuity, Growth, Money, Monthly, Payment, Period, PresentValue};
+///
+/// // What monthly rate amortises 979.318 with twelve payments from 100,
+/// // escalating 2%/month? About 5%.
+/// let r = annuity::growing_rate(
+///     Growth(time_value::Rate::<Monthly>::new(0.02)?),
+///     Period::new(12.0)?,
+///     Payment(Money::agnostic(100.0)?),
+///     PresentValue(Money::agnostic(979.318)?),
+/// )?;
+/// assert!((r.value() - 0.05).abs() < 1e-4);
+/// # Ok::<(), time_value::TvmError>(())
+/// ```
+///
+/// # Errors
+///
+/// - [`TvmError::ZeroPeriods`] if `periods` is zero: the factor is then `0` whatever
+///   the rate, so the equation constrains nothing. This is the *only* degeneracy —
+///   at every `n ≥ 1` the factor genuinely varies with the rate, so there is no
+///   `n = 1` case to guard as [`rate_from_future`] has (ADR-0063's table).
+/// - [`TvmError::SolveDidNotConverge`] if no rate prices the stream at `present`
+///   (e.g. incompatible signs).
+/// - [`TvmError::RateOutOfRange`] / [`TvmError::Overflow`] if the located root is
+///   outside the valid rate domain or non-finite.
+pub fn growing_rate<P: Periodicity>(
+    growth: Growth<P>,
+    periods: Period<P>,
+    payment: Payment,
+    present: PresentValue,
+) -> Result<Rate<P>, TvmError> {
+    let g = growth.value();
+    solve_rate(
+        periods.value(),
+        payment.money().value(),
+        present.money().value(),
+        |r, n| growing_present_value_factor(r, g, n),
     )
 }
 
@@ -787,16 +990,28 @@ fn solve_rate<P: Periodicity>(
 /// ordinary `present_value` (`docs/adr/0015-annuities.md`).
 ///
 /// The mirroring is complete: [`payment_from_future`](due::payment_from_future) is
-/// the start-of-period sinking fund, and [`perpetuity`](due::perpetuity) /
+/// the start-of-period sinking fund, [`perpetuity`](due::perpetuity) /
 /// [`growing_perpetuity`](due::growing_perpetuity) are the start-of-period
 /// perpetuities ADR-0015's amendment deferred as "again a `(1 + r)` scaling"
-/// (ADR-0062).
+/// (ADR-0062), and [`periods`](due::periods) / [`rate`](due::rate) and their
+/// `_from_future` partners are the four solves (ADR-0063).
+///
+/// **The `(1 + r)` scaling moves one degeneracy.** Because the due present-value
+/// factor is `1 + a(r, n − 1)`, it is constant in `r` at `n = 1` — the lone payment
+/// falls today and is never discounted — where the *ordinary* present-value factor
+/// is not; and because the due future-value factor is `s(r, n + 1) − 1`, it is
+/// **not** constant at `n = 1`, where the ordinary future-value factor is. So
+/// [`rate`](due::rate) carries the single-period guard that the ordinary
+/// [`self::rate`] does not need, and [`rate_from_future`](due::rate_from_future)
+/// needs none where [`self::rate_from_future`] does (ADR-0063).
 pub mod due {
     use super::{
         future_value_factor, growing_future_value_factor, growing_present_value_factor,
-        present_value_factor,
+        present_value_factor, solve_rate, unit_factor_outcome,
     };
-    use crate::{Growth, Money, Period, Periodicity, Rate, TvmError};
+    use crate::{
+        FutureValue, Growth, Money, Payment, Period, Periodicity, PresentValue, Rate, TvmError,
+    };
 
     /// The present value of an annuity-due that pays `payment` at the *start* of
     /// each of `periods` periods, discounted at `rate`.
@@ -1095,6 +1310,239 @@ pub mod due {
         let factor = growing_future_value_factor(rate.value(), growth.value(), periods.value())
             * (1.0 + rate.value());
         Money::from_operation(payment.value() * factor, payment.currency())
+    }
+
+    /// The start-of-period `payment` restated as the economically equal
+    /// *end*-of-period one, `PMT · (1 + r)`.
+    ///
+    /// This is the whole content of the two period solves. `PMT · a_due(r, n) = PV`
+    /// is `(PMT · (1 + r)) · a(r, n) = PV` — the `(1 + r)` can be read as scaling the
+    /// factor or as grossing up the payment — so each due solve *is* its ordinary
+    /// counterpart on a payment that earns one extra period of interest. Delegating
+    /// rather than restating the logarithm means no second closed form exists to
+    /// drift, and the error vocabulary (`PaymentDoesNotAmortize`, `NoRealSolution`,
+    /// `NegativePeriods`) comes along unchanged (ADR-0063).
+    fn brought_forward<P: Periodicity>(
+        payment: Payment,
+        rate: Rate<P>,
+    ) -> Result<Payment, TvmError> {
+        let money = payment.money();
+        Money::from_operation(money.value() * (1.0 + rate.value()), money.currency()).map(Payment)
+    }
+
+    /// The number of level start-of-period `payment`s that amortise a `present` value
+    /// at `rate` — [`present_value`] solved for `n` (ADR-0063).
+    ///
+    /// `n = −ln(1 − PV·r / (PMT·(1 + r))) / ln(1 + r)`, or `n = PV / PMT` when
+    /// `r = 0`: [`super::periods`] with the payment grossed up by `(1 + r)`, which is
+    /// exactly how it is computed.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use time_value::{annuity, Money, Monthly, Payment, PresentValue, Rate};
+    ///
+    /// // How many 100-at-month-start payments retire 1136.763 at 1%/month? A year.
+    /// let n = annuity::due::periods(
+    ///     Rate::<Monthly>::new(0.01)?,
+    ///     Payment(Money::agnostic(100.0)?),
+    ///     PresentValue(Money::agnostic(1136.763)?),
+    /// )?;
+    /// assert!((n.value() - 12.0).abs() < 1e-2);
+    /// # Ok::<(), time_value::TvmError>(())
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// As [`super::periods`], on the grossed-up payment: [`PaymentDoesNotAmortize`]
+    /// if `PMT·(1 + r) ≤ PV·r`, so the payment and its extra period of interest do
+    /// not even cover the period's interest (a zero payment included), and
+    /// [`NegativePeriods`] if the solved `n` is negative. [`TvmError::Overflow`] if
+    /// grossing up the payment overflows.
+    ///
+    /// [`PaymentDoesNotAmortize`]: TvmError::PaymentDoesNotAmortize
+    /// [`NegativePeriods`]: TvmError::NegativePeriods
+    pub fn periods<P: Periodicity>(
+        rate: Rate<P>,
+        payment: Payment,
+        present: PresentValue,
+    ) -> Result<Period<P>, TvmError> {
+        super::periods(rate, brought_forward(payment, rate)?, present)
+    }
+
+    /// The number of level start-of-period `payment`s that accumulate to a `future`
+    /// value at `rate` — [`future_value`] solved for `n` (ADR-0063).
+    ///
+    /// `n = ln(1 + FV·r / (PMT·(1 + r))) / ln(1 + r)`, or `n = FV / PMT` when
+    /// `r = 0`: [`super::periods_from_future`] on the same grossed-up payment.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use time_value::{annuity, FutureValue, Money, Monthly, Payment, Rate};
+    ///
+    /// // How many 100-at-month-start contributions reach 1280.933 at 1%/month?
+    /// let n = annuity::due::periods_from_future(
+    ///     Rate::<Monthly>::new(0.01)?,
+    ///     Payment(Money::agnostic(100.0)?),
+    ///     FutureValue(Money::agnostic(1280.933)?),
+    /// )?;
+    /// assert!((n.value() - 12.0).abs() < 1e-2);
+    /// # Ok::<(), time_value::TvmError>(())
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// As [`super::periods_from_future`], on the grossed-up payment:
+    /// [`TvmError::NoRealSolution`] if the logarithm has no real value (the payment
+    /// and the target are inconsistent in sign or magnitude, or the payment is zero),
+    /// [`TvmError::NegativePeriods`] if the solved `n` is negative, or
+    /// [`TvmError::Overflow`] if grossing up the payment overflows.
+    pub fn periods_from_future<P: Periodicity>(
+        rate: Rate<P>,
+        payment: Payment,
+        future: FutureValue,
+    ) -> Result<Period<P>, TvmError> {
+        super::periods_from_future(rate, brought_forward(payment, rate)?, future)
+    }
+
+    /// The per-period rate at which `periods` level start-of-period `payment`s
+    /// amortise a `present` value — [`present_value`] solved for `r` (ADR-0063).
+    ///
+    /// Solves iteratively like [`super::rate`], for the root of
+    /// `PMT · a(r, n) · (1 + r) − PV`, and names its periodicity the same way:
+    /// `annuity::due::rate::<Monthly>(…)`. The scaled factor is
+    /// `1 + a(r, n − 1)`, so it is non-increasing in `r` exactly as the ordinary one
+    /// is, and the root is unique.
+    ///
+    /// **Its range is narrower than the ordinary solve's**, which is worth knowing
+    /// before reading an error: the first payment falls today undiscounted, so the
+    /// factor is at least `1` and the present value of the stream is always *at
+    /// least* one payment. A target at or below `PMT` therefore has no solution
+    /// (rather than a very large rate), and one just above it solves to a rate large
+    /// enough to be limited by the search's range.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use time_value::{annuity, Money, Monthly, Payment, Period, PresentValue};
+    ///
+    /// // What monthly rate amortises 1136.763 with 12 start-of-month 100s? ~1%.
+    /// let r = annuity::due::rate::<Monthly>(
+    ///     Period::new(12.0)?,
+    ///     Payment(Money::agnostic(100.0)?),
+    ///     PresentValue(Money::agnostic(1136.763)?),
+    /// )?;
+    /// assert!((r.value() - 0.01).abs() < 1e-4);
+    /// # Ok::<(), time_value::TvmError>(())
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// - [`TvmError::ZeroPeriods`] if `periods` is zero: the factor is `0` whatever
+    ///   the rate, so the equation constrains nothing (ADR-0056).
+    /// - The **single-period** degeneracy, which the ordinary [`super::rate`] does
+    ///   *not* have: over one period this factor is exactly `1` for every rate — the
+    ///   lone payment falls today and is never discounted — so the equation reduces
+    ///   to `PMT = PV` with the rate absent. [`TvmError::IndeterminateRate`] if the
+    ///   two are satisfied (every rate works), [`TvmError::NoRealSolution`] if they
+    ///   are not (none does) — the same pair, for the same reason, that
+    ///   [`super::rate_from_future`] reports at `n = 1` (ADR-0063).
+    /// - [`TvmError::SolveDidNotConverge`] if no rate prices the stream at `present`,
+    ///   which includes every target below the first payment.
+    /// - [`TvmError::RateOutOfRange`] / [`TvmError::Overflow`] if the located root is
+    ///   outside the valid rate domain or non-finite.
+    pub fn rate<P: Periodicity>(
+        periods: Period<P>,
+        payment: Payment,
+        present: PresentValue,
+    ) -> Result<Rate<P>, TvmError> {
+        // `a_due(r, n) = (1 + r)·a(r, n) = 1 + a(r, n − 1)`, so at `n = 1` it is
+        // exactly `1` for every rate and the equation says nothing about `r`. This is
+        // the degeneracy the `(1 + r)` scaling *moves here* from the ordinary
+        // future-value solve; without the guard the bracketing scan would find its
+        // first probe to be a root and return the `−0.9999` sentinel (ADR-0056).
+        //
+        // `n = 1` is the only such term: `1 + a(r, n − 1)` is constant in `r` only
+        // where `a(r, n − 1)` is, i.e. at `n − 1 = 0`. The `n = 0` row (where the
+        // factor is `0`) is handled in `solve_rate`. The test is exact, and written
+        // against zero for the crate's `float_cmp` lint.
+        if periods.value() - 1.0 == 0.0 {
+            return Err(unit_factor_outcome(
+                payment.money().value(),
+                present.money().value(),
+            ));
+        }
+        solve_rate(
+            periods.value(),
+            payment.money().value(),
+            present.money().value(),
+            |r, n| present_value_factor(r, n) * (1.0 + r),
+        )
+    }
+
+    /// The per-period rate at which `periods` level start-of-period `payment`s
+    /// accumulate to a `future` value — [`future_value`] solved for `r` (ADR-0063).
+    ///
+    /// Solves iteratively for the root of `PMT · s(r, n) · (1 + r) − FV`, and names
+    /// its periodicity as `annuity::due::rate_from_future::<Monthly>(…)`.
+    ///
+    /// **This one needs no single-period guard**, unlike [`super::rate_from_future`].
+    /// The scaled factor is `s(r, n + 1) − 1`, which at `n = 1` is `1 + r` — it varies
+    /// with the rate, so a single start-of-period contribution reaching a target is a
+    /// perfectly determined solve, `r = FV/PMT − 1` (ADR-0063).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use time_value::{annuity, FutureValue, Money, Monthly, Payment, Period};
+    ///
+    /// // What monthly rate takes 12 start-of-month 100s to 1280.933? ~1%.
+    /// let r = annuity::due::rate_from_future::<Monthly>(
+    ///     Period::new(12.0)?,
+    ///     Payment(Money::agnostic(100.0)?),
+    ///     FutureValue(Money::agnostic(1280.933)?),
+    /// )?;
+    /// assert!((r.value() - 0.01).abs() < 1e-4);
+    /// # Ok::<(), time_value::TvmError>(())
+    /// ```
+    ///
+    /// A single contribution is solvable here — the one place this differs from the
+    /// ordinary sinking-fund rate solve, which is
+    /// [indeterminate](TvmError::IndeterminateRate) on the same term:
+    ///
+    /// ```
+    /// use time_value::{annuity, FutureValue, Money, Monthly, Payment, Period};
+    ///
+    /// // One contribution of 100 today, worth 125 a period later: r = 25%.
+    /// let r = annuity::due::rate_from_future::<Monthly>(
+    ///     Period::new(1.0)?,
+    ///     Payment(Money::agnostic(100.0)?),
+    ///     FutureValue(Money::agnostic(125.0)?),
+    /// )?;
+    /// assert!((r.value() - 0.25).abs() < 1e-6);
+    /// # Ok::<(), time_value::TvmError>(())
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// - [`TvmError::ZeroPeriods`] if `periods` is zero: the factor is `0` whatever
+    ///   the rate (ADR-0056).
+    /// - [`TvmError::SolveDidNotConverge`] if no rate takes the contributions to
+    ///   `future` (e.g. incompatible signs).
+    /// - [`TvmError::RateOutOfRange`] / [`TvmError::Overflow`] if the located root is
+    ///   outside the valid rate domain or non-finite.
+    pub fn rate_from_future<P: Periodicity>(
+        periods: Period<P>,
+        payment: Payment,
+        future: FutureValue,
+    ) -> Result<Rate<P>, TvmError> {
+        solve_rate(
+            periods.value(),
+            payment.money().value(),
+            future.money().value(),
+            |r, n| future_value_factor(r, n) * (1.0 + r),
+        )
     }
 }
 
@@ -1882,12 +2330,371 @@ mod tests {
         }
     }
 
-    /// The growing annuity (ADR-0048). The closed forms are checked against a
-    /// term-by-term sum of the payments themselves — an independent reference, so
-    /// a mistranscribed factor cannot agree with it by construction.
+    /// The four annuity-due solves (ADR-0063). Every case is built from a
+    /// term-by-term summation of the stream and then solved back, so the closed forms
+    /// and the iteration are checked against an independent reference rather than
+    /// against the crate's own `due::present_value` / `due::future_value`.
+    mod due_solves {
+        use super::{approx, rate};
+        use crate::{
+            annuity, FutureValue, Money, Monthly, Payment, Period, PresentValue, TvmError,
+        };
+
+        /// `Σ PMT/(1+r)^k` for `k = 0..n` — an annuity-**due**'s present value summed
+        /// one payment at a time, the first falling today and so undiscounted.
+        fn present_value_by_summation(r: f64, n: u32, pmt: f64) -> f64 {
+            let mut total = 0.0;
+            let mut discount = 1.0;
+            for _ in 0..n {
+                total += pmt / discount;
+                discount *= 1.0 + r;
+            }
+            total
+        }
+
+        /// `Σ PMT·(1+r)^k` for `k = 1..=n` — the same stream carried forward to the
+        /// end of period `n`, so every payment earns one period more than an ordinary
+        /// annuity's would.
+        fn future_value_by_summation(r: f64, n: u32, pmt: f64) -> f64 {
+            let mut total = 0.0;
+            let mut compounded = 1.0 + r;
+            for _ in 0..n {
+                total += pmt * compounded;
+                compounded *= 1.0 + r;
+            }
+            total
+        }
+
+        fn pmt(amount: f64) -> Payment {
+            Payment(Money::agnostic(amount).unwrap())
+        }
+
+        /// Recovering the term from a summed present value.
+        ///
+        /// The tolerance is derived. The reference accumulates `n` additions, so it
+        /// carries about `n` ULP — `2.7e-15` relative at `n = 12` — and the solve
+        /// converts a relative error in the value into an absolute error in the term
+        /// through `PV / (dPV/dn)`, which is `12.7` here. That leaves the recovered
+        /// term within about `3.5e-14` of `12`; `1e-9` is that bound with four orders
+        /// of margin, and still far tighter than any transcription error.
+        #[test]
+        fn periods_recovers_the_term_of_a_summed_stream() {
+            let present = present_value_by_summation(0.01, 12, 100.0);
+            let n = annuity::due::periods(
+                rate(0.01),
+                pmt(100.0),
+                PresentValue(Money::agnostic(present).unwrap()),
+            )
+            .unwrap();
+            assert!(approx(n.value(), 12.0, 1e-9), "solved {}", n.value());
+        }
+
+        /// The same, from the far end of the horizon. `FV / (dFV/dn)` is `11.3` here,
+        /// so the same argument gives the same `1e-9`.
+        #[test]
+        fn periods_from_future_recovers_the_term_of_a_summed_stream() {
+            let future = future_value_by_summation(0.01, 12, 100.0);
+            let n = annuity::due::periods_from_future(
+                rate(0.01),
+                pmt(100.0),
+                FutureValue(Money::agnostic(future).unwrap()),
+            )
+            .unwrap();
+            assert!(approx(n.value(), 12.0, 1e-9), "solved {}", n.value());
+        }
+
+        /// At `r = 0` nothing is discounted or compounded, so both solves reduce to
+        /// dividing the total by the payment — and the `(1 + r)` gross-up is `1`, so
+        /// the due answers coincide with the ordinary ones.
+        #[test]
+        fn a_zero_rate_uses_the_limit() {
+            let total = PresentValue(Money::agnostic(1_200.0).unwrap());
+            let n = annuity::due::periods(rate(0.0), pmt(100.0), total).unwrap();
+            assert!(approx(n.value(), 12.0, 1e-9));
+            let n = annuity::due::periods_from_future(
+                rate(0.0),
+                pmt(100.0),
+                FutureValue(total.money()),
+            )
+            .unwrap();
+            assert!(approx(n.value(), 12.0, 1e-9));
+        }
+
+        /// Recovering the rate from a summed present value.
+        ///
+        /// The tolerance is derived. A root is accepted when the residual is within
+        /// `1e-9` of the scale `|priced| + |target| ≈ 2273`, i.e. `2.3e-6`; the factor
+        /// moves the priced value by `dPV/dr ≈ −6057` per unit of rate, so the rate
+        /// itself is pinned only to about `3.8e-10`. (The reference's own `2.7e-15`
+        /// relative error adds `6e-16`, four orders below that, so it does not
+        /// participate.) `1e-8` is that floor with 26× of margin.
+        #[test]
+        fn rate_recovers_the_rate_of_a_summed_stream() {
+            let present = present_value_by_summation(0.01, 12, 100.0);
+            let r = annuity::due::rate::<Monthly>(
+                Period::new(12.0).unwrap(),
+                pmt(100.0),
+                PresentValue(Money::agnostic(present).unwrap()),
+            )
+            .unwrap();
+            assert!(approx(r.value(), 0.01, 1e-8), "solved {}", r.value());
+        }
+
+        /// The same from the future value, where `dFV/dr ≈ 8394` against a scale of
+        /// `2562`, pinning the rate to about `3.1e-10` — so `1e-8` again.
+        #[test]
+        fn rate_from_future_recovers_the_rate_of_a_summed_stream() {
+            let future = future_value_by_summation(0.01, 12, 100.0);
+            let r = annuity::due::rate_from_future::<Monthly>(
+                Period::new(12.0).unwrap(),
+                pmt(100.0),
+                FutureValue(Money::agnostic(future).unwrap()),
+            )
+            .unwrap();
+            assert!(approx(r.value(), 0.01, 1e-8), "solved {}", r.value());
+        }
+
+        /// A negative rate is recovered as readily as a positive one: an annuity-due
+        /// priced above `PMT·n` can only be discounted at a negative rate.
+        #[test]
+        fn rate_recovers_a_negative_rate() {
+            let present = present_value_by_summation(-0.02, 12, 100.0);
+            let r = annuity::due::rate::<Monthly>(
+                Period::new(12.0).unwrap(),
+                pmt(100.0),
+                PresentValue(Money::agnostic(present).unwrap()),
+            )
+            .unwrap();
+            assert!(approx(r.value(), -0.02, 1e-8), "solved {}", r.value());
+        }
+
+        /// A zero term makes both due factors identically `0`, so neither equation
+        /// constrains the rate — the row `solve_rate` already owns (ADR-0056).
+        #[test]
+        fn a_zero_term_is_zero_periods_in_both_rate_solves() {
+            for result in [
+                annuity::due::rate::<Monthly>(Period::ZERO, pmt(500.0), PresentValue(Money::ZERO)),
+                annuity::due::rate_from_future::<Monthly>(
+                    Period::ZERO,
+                    pmt(500.0),
+                    FutureValue(Money::ZERO),
+                ),
+            ] {
+                assert_eq!(result, Err(TvmError::ZeroPeriods));
+            }
+        }
+
+        /// The degeneracy the `(1 + r)` scaling **moves**: over one period the due
+        /// present-value factor is exactly `1` — the lone payment falls today and is
+        /// never discounted — so the rate drops out of the equation. Where the
+        /// ordinary `rate` is perfectly well posed at `n = 1`, this one is not.
+        #[test]
+        fn a_single_period_present_solve_is_indeterminate_when_the_target_matches() {
+            assert_eq!(
+                annuity::due::rate::<Monthly>(
+                    Period::new(1.0).unwrap(),
+                    pmt(100.0),
+                    PresentValue(Money::agnostic(100.0).unwrap()),
+                ),
+                Err(TvmError::IndeterminateRate)
+            );
+            // Contrast: the ordinary present-value factor varies with `r` at `n = 1`,
+            // so the same shape of input is a determined solve there (ADR-0056's
+            // table has no `n = 1` row for it).
+            assert!(annuity::rate::<Monthly>(
+                Period::new(1.0).unwrap(),
+                pmt(100.0),
+                PresentValue(Money::agnostic(100.0).unwrap()),
+            )
+            .is_ok());
+        }
+
+        /// As for the ordinary future solve, "matches" is the solver's own root test,
+        /// not `==`: a target a hair away is still satisfied at every rate, and an
+        /// exact-equality guard would let it leak the `−0.9999` sentinel.
+        #[test]
+        fn a_single_period_present_solve_is_indeterminate_within_the_root_tolerance() {
+            assert_eq!(
+                annuity::due::rate::<Monthly>(
+                    Period::new(1.0).unwrap(),
+                    pmt(100.0),
+                    // 1e-13 adrift: far inside 1e-9 × (100 + 100).
+                    PresentValue(Money::agnostic(100.000_000_000_000_1).unwrap()),
+                ),
+                Err(TvmError::IndeterminateRate)
+            );
+        }
+
+        /// The other half of the same row: a single payment that cannot reach the
+        /// target is satisfied by *no* rate, which is a different variant.
+        #[test]
+        fn a_single_period_present_solve_has_no_solution_when_the_target_differs() {
+            assert_eq!(
+                annuity::due::rate::<Monthly>(
+                    Period::new(1.0).unwrap(),
+                    pmt(100.0),
+                    PresentValue(Money::agnostic(150.0).unwrap()),
+                ),
+                Err(TvmError::NoRealSolution)
+            );
+        }
+
+        /// And the row that is **absent** here: the due future-value factor is
+        /// `s(r, n + 1) − 1`, which at `n = 1` is `1 + r`, so a single contribution
+        /// reaching a target is a determined solve — `r = FV/PMT − 1` — where the
+        /// *ordinary* future solve is indeterminate on the same term (ADR-0063).
+        #[test]
+        fn a_single_period_future_solve_is_determined_unlike_the_ordinary_one() {
+            let r = annuity::due::rate_from_future::<Monthly>(
+                Period::new(1.0).unwrap(),
+                pmt(100.0),
+                FutureValue(Money::agnostic(125.0).unwrap()),
+            )
+            .unwrap();
+            // The factor is `1 + r` exactly, so this is a division, not an iteration:
+            // 125/100 − 1. The solver's tolerance is `1e-9 × 225 = 2.3e-7` against a
+            // derivative of `100`, pinning the rate to `2.3e-9`; `1e-8` clears it.
+            assert!(approx(r.value(), 0.25, 1e-8), "solved {}", r.value());
+
+            assert_eq!(
+                annuity::rate_from_future::<Monthly>(
+                    Period::new(1.0).unwrap(),
+                    pmt(100.0),
+                    FutureValue(Money::agnostic(100.0).unwrap()),
+                ),
+                Err(TvmError::IndeterminateRate)
+            );
+        }
+
+        /// The due present value is always at least one payment — the first falls
+        /// today, undiscounted — so a target below the payment is reached by no rate
+        /// at all. Worth pinning because the ordinary solve has no such floor.
+        #[test]
+        fn a_target_below_the_first_payment_does_not_converge() {
+            assert_eq!(
+                annuity::due::rate::<Monthly>(
+                    Period::new(12.0).unwrap(),
+                    pmt(100.0),
+                    PresentValue(Money::agnostic(80.0).unwrap()),
+                ),
+                Err(TvmError::SolveDidNotConverge)
+            );
+        }
+
+        /// A payment that does not cover the period's interest never retires the
+        /// balance — the same condition and variant as the ordinary solve, applied to
+        /// the grossed-up payment (`PMT·(1 + r) ≤ PV·r`).
+        #[test]
+        fn a_payment_that_cannot_cover_interest_does_not_amortise() {
+            assert_eq!(
+                annuity::due::periods(
+                    rate(0.05),
+                    pmt(100.0),
+                    PresentValue(Money::agnostic(10_000.0).unwrap()),
+                ),
+                Err(TvmError::PaymentDoesNotAmortize)
+            );
+            assert_eq!(
+                annuity::due::periods(
+                    rate(0.0),
+                    Payment(Money::ZERO),
+                    PresentValue(Money::agnostic(1_000.0).unwrap()),
+                ),
+                Err(TvmError::PaymentDoesNotAmortize)
+            );
+        }
+
+        /// Nothing accumulates from nothing, whatever the rate — `periods_from_future`
+        /// has no interest threshold to name, so its variant is `NoRealSolution`
+        /// (ADR-0052), inherited through the delegation.
+        #[test]
+        fn a_stream_that_cannot_reach_its_target_has_no_solution() {
+            assert_eq!(
+                annuity::due::periods_from_future(
+                    rate(0.0),
+                    Payment(Money::ZERO),
+                    FutureValue(Money::agnostic(1_000.0).unwrap()),
+                ),
+                Err(TvmError::NoRealSolution)
+            );
+        }
+
+        /// `solve_rate`'s rustdoc rests the uniqueness of its root on the factor being
+        /// monotone in the rate, so the *scaled* factors have to be monotone too — in
+        /// floating point, not merely in algebra (ADR-0054). They are, for every
+        /// `n ≥ 2`: the due present-value factor is `1 + a(r, n − 1)` and the due
+        /// future-value factor is `s(r, n + 1) − 1`, each inheriting its parent's
+        /// direction.
+        ///
+        /// `n = 1` is excluded deliberately: the due present-value factor is
+        /// *constant* there, so it wobbles by an ULP either way — which is exactly why
+        /// `due::rate` guards that term instead of solving it.
+        #[test]
+        fn the_due_factors_are_monotone_in_the_rate() {
+            let payment = Money::agnostic(1_000.0).unwrap();
+
+            // The band around zero where the cancellation ADR-0054 removed used to
+            // bite, for both directions and every term.
+            for n in [2.0, 12.0, 30.0, 360.0] {
+                let periods = Period::new(n).unwrap();
+                let (mut last_present, mut last_future) = (f64::INFINITY, f64::NEG_INFINITY);
+                let mut r = -2e-8;
+                while r <= 2e-8 {
+                    let present = annuity::due::present_value(rate(r), periods, payment)
+                        .unwrap()
+                        .value();
+                    let future = annuity::due::future_value(rate(r), periods, payment)
+                        .unwrap()
+                        .value();
+                    assert!(present <= last_present, "due PV rose at {r} (n = {n})");
+                    assert!(future >= last_future, "due FV fell at {r} (n = {n})");
+                    (last_present, last_future) = (present, future);
+                    r += 1e-10;
+                }
+            }
+
+            // …and the far field, on the grid each quantity can actually represent.
+            // A long horizon at an extreme rate overflows `f64` in opposite corners:
+            // the present value at `r = −0.9, n = 360` (every payment inflated by
+            // `10^k`) and the future value at `r = 100, n = 360`. Beyond those the
+            // comparison would be between two `Overflow` errors, so each grid stops
+            // where the arithmetic is still meaningful — the present-value grid is the
+            // one `present_value_is_non_increasing_in_the_rate` already uses.
+            for n in [2.0, 12.0, 30.0, 360.0] {
+                let periods = Period::new(n).unwrap();
+                let mut previous = f64::INFINITY;
+                for r in [-0.5, -0.02, -1e-4, 0.0, 1e-4, 0.02, 0.5, 5.0, 100.0] {
+                    let present = annuity::due::present_value(rate(r), periods, payment)
+                        .unwrap()
+                        .value();
+                    assert!(present <= previous, "due PV rose at rate {r} (n = {n})");
+                    previous = present;
+                }
+            }
+            for n in [2.0, 12.0, 30.0] {
+                let periods = Period::new(n).unwrap();
+                let mut previous = f64::NEG_INFINITY;
+                for r in [-0.9, -0.5, -0.02, -1e-4, 0.0, 1e-4, 0.02, 0.5, 5.0] {
+                    let future = annuity::due::future_value(rate(r), periods, payment)
+                        .unwrap()
+                        .value();
+                    assert!(future >= previous, "due FV fell at rate {r} (n = {n})");
+                    previous = future;
+                }
+            }
+        }
+    }
+
+    /// The growing annuity (ADR-0048) and its inverses (ADR-0063). The closed forms
+    /// are checked against a term-by-term sum of the payments themselves — an
+    /// independent reference, so a mistranscribed factor cannot agree with it by
+    /// construction.
     mod growing {
         use super::{approx, growth, rate};
-        use crate::{annuity, Currency, Money, Period, TvmError};
+        use crate::{
+            annuity, Currency, Growth, Money, Monthly, Payment, Period, PresentValue, Rate,
+            TvmError,
+        };
 
         /// `Σ PMT·(1+g)^(k−1) / (1+r)^k` for `k = 1..=n` — the ordinary growing
         /// annuity summed directly, one payment at a time.
@@ -2136,6 +2943,384 @@ mod tests {
                 0.0,
                 1e-12,
             ));
+        }
+
+        // ---- The inverses (ADR-0063) ----
+        //
+        // Each is fed a present value built by `present_value_by_summation` above and
+        // asked to recover the argument that produced it, so nothing here is checked
+        // against the crate's own `growing_present_value`.
+
+        fn pmt(amount: f64) -> Payment {
+            Payment(Money::agnostic(amount).unwrap())
+        }
+
+        /// The payment is recovered by dividing by the same factor that multiplied it,
+        /// so the only error is the reference's own — about `n` ULP, `2.7e-15` relative
+        /// at `n = 12`, or `2.7e-13` on a payment of 100. Nothing amplifies it, so
+        /// `1e-9` has four orders of margin.
+        #[test]
+        fn payment_recovers_the_payment_of_a_summed_stream() {
+            let present = present_value_by_summation(0.05, 0.02, 12, 100.0);
+            let recovered = annuity::growing_payment(
+                rate(0.05),
+                growth(0.02),
+                Period::new(12.0).unwrap(),
+                Money::agnostic(present).unwrap(),
+            )
+            .unwrap();
+            assert!(approx(recovered.value(), 100.0, 1e-9));
+        }
+
+        /// The term is recovered through `PV / (dPV/dn) = 14.4` here, so the
+        /// reference's `2.7e-15` relative error becomes about `3.9e-14` of term;
+        /// `1e-9` is four orders above that.
+        #[test]
+        fn periods_recovers_the_term_of_a_summed_stream() {
+            let present = present_value_by_summation(0.05, 0.02, 12, 100.0);
+            let n = annuity::growing_periods(
+                rate(0.05),
+                growth(0.02),
+                pmt(100.0),
+                PresentValue(Money::agnostic(present).unwrap()),
+            )
+            .unwrap();
+            assert!(approx(n.value(), 12.0, 1e-9), "solved {}", n.value());
+        }
+
+        /// The rate solve's tolerance is derived like every other: a root is accepted
+        /// within `1e-9` of the scale `|priced| + |target| ≈ 1959`, i.e. `2.0e-6`, and
+        /// the factor moves the priced value by `dPV/dr ≈ −5741` per unit of rate, so
+        /// the rate is pinned only to about `3.4e-10`. `1e-8` clears that by 29×.
+        #[test]
+        fn rate_recovers_the_rate_of_a_summed_stream() {
+            let present = present_value_by_summation(0.05, 0.02, 12, 100.0);
+            let r = annuity::growing_rate(
+                growth(0.02),
+                Period::new(12.0).unwrap(),
+                pmt(100.0),
+                PresentValue(Money::agnostic(present).unwrap()),
+            )
+            .unwrap();
+            assert!(approx(r.value(), 0.05, 1e-8), "solved {}", r.value());
+        }
+
+        /// Growth **above** the rate is inverted as readily as it is priced: with no
+        /// perpetuity ceiling, every target is reached by some finite term.
+        #[test]
+        fn growth_above_the_rate_is_inverted_not_rejected() {
+            let present = present_value_by_summation(0.02, 0.05, 12, 100.0);
+            let n = annuity::growing_periods(
+                rate(0.02),
+                growth(0.05),
+                pmt(100.0),
+                PresentValue(Money::agnostic(present).unwrap()),
+            )
+            .unwrap();
+            assert!(approx(n.value(), 12.0, 1e-9), "solved {}", n.value());
+        }
+
+        /// At `r = g` the closed forms are `0/0` and the solves take their limits:
+        /// every payment discounts to the same amount, so the factor is `n / (1 + r)`
+        /// and the term is exactly proportional to the balance. `PV / (dPV/dn)` is
+        /// `10` at the point used, so `1e-9` carries the same margin as above.
+        #[test]
+        fn growth_equal_to_the_rate_uses_the_limit_in_the_solves() {
+            let present = present_value_by_summation(0.05, 0.05, 10, 100.0);
+            let target = Money::agnostic(present).unwrap();
+
+            let recovered = annuity::growing_payment(
+                rate(0.05),
+                growth(0.05),
+                Period::new(10.0).unwrap(),
+                target,
+            )
+            .unwrap();
+            assert!(approx(recovered.value(), 100.0, 1e-9));
+
+            let n = annuity::growing_periods(
+                rate(0.05),
+                growth(0.05),
+                pmt(100.0),
+                PresentValue(target),
+            )
+            .unwrap();
+            assert!(approx(n.value(), 10.0, 1e-9), "solved {}", n.value());
+        }
+
+        /// The solves inherit the factors' cancellation-free treatment of a vanishing
+        /// spread (ADR-0054): both of `growing_periods`' logarithms are `ln1p` of a
+        /// quantity proportional to `r − g`, so the spread cancels between them and no
+        /// near-zero band is needed. Checked at spreads far inside the `1e-9` band the
+        /// factors once used, against the term-by-term reference.
+        #[test]
+        fn a_vanishing_spread_is_accurate_in_the_solves_too() {
+            for (r, g, n) in [
+                (0.05, 0.05 - 1e-9, 10u32),
+                (0.05, 0.05 - 1e-10, 10),
+                (0.05, 0.05 + 1e-9, 10),
+                (0.1, 0.1 - 1e-9, 30),
+            ] {
+                let present = present_value_by_summation(r, g, n, 100.0);
+                let solved = annuity::growing_periods(
+                    rate(r),
+                    growth(g),
+                    pmt(100.0),
+                    PresentValue(Money::agnostic(present).unwrap()),
+                )
+                .unwrap()
+                .value();
+                assert!(
+                    approx(solved, f64::from(n), 1e-6),
+                    "r = {r}, g = {g}, n = {n}: solved {solved}",
+                );
+            }
+        }
+
+        /// At `g = 0` each inverse *is* its level counterpart — the relation the
+        /// rustdoc asserts, in the direction the solves read it.
+        ///
+        /// The near-zero rates the level `periods` handles with a band are excluded
+        /// and pinned separately below, because there the two forms genuinely differ.
+        #[test]
+        fn zero_growth_recovers_the_level_solves() {
+            let payment = Money::agnostic(100.0).unwrap();
+            for (r, n) in [(0.05, 12.0), (0.0, 12.0), (1e-9, 12.0), (-0.02, 30.0)] {
+                let periods = Period::new(n).unwrap();
+                let present = annuity::present_value(rate(r), periods, payment).unwrap();
+
+                // The payment solves divide by the *same* private factor, so this
+                // identity is exact at every rate, band or no band.
+                let level = annuity::payment(rate(r), periods, present).unwrap();
+                let grown =
+                    annuity::growing_payment(rate(r), growth(0.0), periods, present).unwrap();
+                assert!(approx(level.value(), grown.value(), 1e-9), "r = {r}");
+            }
+
+            for (r, n) in [(0.05, 12.0), (0.0, 12.0), (-0.02, 30.0)] {
+                let periods = Period::new(n).unwrap();
+                let present = annuity::present_value(rate(r), periods, payment).unwrap();
+                let level = annuity::periods(rate(r), Payment(payment), PresentValue(present))
+                    .unwrap()
+                    .value();
+                let grown = annuity::growing_periods(
+                    rate(r),
+                    growth(0.0),
+                    Payment(payment),
+                    PresentValue(present),
+                )
+                .unwrap()
+                .value();
+                // Both solve the same equation, but by different (equally valid)
+                // logarithmic arrangements: the level form divides by `ln(1 + r)`
+                // while the growing one divides by `ln1p(−r/(1 + r))`. They agree to a
+                // few ULP of `n`, not bit-for-bit.
+                assert!(approx(level, grown, 1e-9 * n), "periods: r = {r}");
+            }
+        }
+
+        /// Inside the band the two period solves part company, and the growing one is
+        /// the accurate half — worth pinning, because it is the visible consequence of
+        /// arranging the solve as a ratio of two `ln1p`s instead of switching to a
+        /// limit near `r = 0` (ADR-0054, ADR-0063).
+        ///
+        /// At `r = 1e-9, n = 12` the level solve takes its `r → 0` limit `PV/PMT` and
+        /// answers `11.999999922`; the same equation solved through the spread answers
+        /// `12.000000000`. (The level *closed form*, band aside, would answer
+        /// `11.99999996` — the cancellation in `1 − PV·r/PMT` costs the digits, which
+        /// is precisely why the band is there.) The reference is the term-by-term sum,
+        /// so `12` is the independently-known truth rather than the other function's
+        /// opinion.
+        #[test]
+        fn a_near_zero_rate_needs_no_band_in_the_growing_solve() {
+            for r in [1e-9, 5e-10, 1e-8, -1e-9, -1e-8] {
+                let present = present_value_by_summation(r, 0.0, 12, 100.0);
+                let n = annuity::growing_periods(
+                    rate(r),
+                    growth(0.0),
+                    pmt(100.0),
+                    PresentValue(Money::agnostic(present).unwrap()),
+                )
+                .unwrap()
+                .value();
+                assert!(approx(n, 12.0, 1e-12), "r = {r}: solved {n}");
+            }
+        }
+
+        /// A zero term makes the factor `0`, so the payment has no answer — the same
+        /// degeneracy, and the same variant, as the level `payment`. It is the *only*
+        /// zero of the growing factor: every `n ≥ 1` sums `n` strictly positive
+        /// discounted payments, whatever the rate and growth (ADR-0063's table).
+        #[test]
+        fn a_zero_term_has_no_payment() {
+            assert_eq!(
+                annuity::growing_payment(
+                    rate(0.05),
+                    growth(0.02),
+                    Period::ZERO,
+                    Money::agnostic(1_000.0).unwrap(),
+                ),
+                Err(TvmError::ZeroPeriods),
+            );
+        }
+
+        /// …and the same term makes the rate solve say nothing about the rate.
+        #[test]
+        fn a_zero_term_is_zero_periods_in_the_rate_solve() {
+            assert_eq!(
+                annuity::growing_rate(
+                    growth(0.02),
+                    Period::ZERO,
+                    pmt(500.0),
+                    PresentValue(Money::ZERO)
+                ),
+                Err(TvmError::ZeroPeriods),
+            );
+        }
+
+        /// The row that is **absent** from the growing table: at `n = 1` the factor is
+        /// `1/(1 + r)`, which varies with the rate, so a single payment is a determined
+        /// solve — unlike `rate_from_future`, whose factor is constant there.
+        #[test]
+        fn a_single_period_rate_solve_is_determined() {
+            let r = annuity::growing_rate(
+                growth(0.02),
+                Period::new(1.0).unwrap(),
+                pmt(100.0),
+                PresentValue(Money::agnostic(80.0).unwrap()),
+            )
+            .unwrap();
+            // 100/(1 + r) = 80, so r = 0.25. Growth never enters a one-payment stream.
+            assert!(approx(r.value(), 0.25, 1e-8), "solved {}", r.value());
+        }
+
+        /// When the rate exceeds the growth the present value is capped by the
+        /// growing **perpetuity**, `PMT/(r − g)`, so a target at or above that cap is
+        /// reached by no finite term. The variant is the level solve's:
+        /// `PMT ≤ PV·(r − g)` is `periods`' interest threshold with the spread in place
+        /// of the rate.
+        #[test]
+        fn a_target_above_the_perpetuity_ceiling_does_not_amortise() {
+            let ceiling = annuity::growing_perpetuity(
+                rate(0.05),
+                growth(0.02),
+                Money::agnostic(100.0).unwrap(),
+            )
+            .unwrap();
+            for target in [ceiling.value(), ceiling.value() * 1.01] {
+                assert_eq!(
+                    annuity::growing_periods(
+                        rate(0.05),
+                        growth(0.02),
+                        pmt(100.0),
+                        PresentValue(Money::agnostic(target).unwrap()),
+                    ),
+                    Err(TvmError::PaymentDoesNotAmortize),
+                    "target {target}",
+                );
+            }
+            // Just below the ceiling is a long but finite term.
+            assert!(annuity::growing_periods(
+                rate(0.05),
+                growth(0.02),
+                pmt(100.0),
+                PresentValue(Money::agnostic(ceiling.value() * 0.99).unwrap()),
+            )
+            .is_ok());
+        }
+
+        /// Paying nothing retires nothing, at any rate or growth — including on the
+        /// `r = g` limit branch, where the guard has to be explicit because the
+        /// division is by the payment rather than through a logarithm.
+        #[test]
+        fn a_zero_payment_does_not_amortise() {
+            for (r, g) in [(0.05, 0.02), (0.05, 0.05), (0.02, 0.05)] {
+                assert_eq!(
+                    annuity::growing_periods(
+                        rate(r),
+                        growth(g),
+                        Payment(Money::ZERO),
+                        PresentValue(Money::agnostic(1_000.0).unwrap()),
+                    ),
+                    Err(TvmError::PaymentDoesNotAmortize),
+                    "r = {r}, g = {g}",
+                );
+            }
+        }
+
+        /// `growing_rate`'s uniqueness argument is that the factor, written as the sum
+        /// `Σ (1 + g)^(k−1)·(1 + r)^(−k)`, is strictly decreasing in `r` with `g` held
+        /// fixed — every term is. Pin it in floating point, including across `r = g`
+        /// where the closed form switches to its limit and a naive reading of the
+        /// spread suggests the direction might reverse.
+        #[test]
+        fn the_growing_present_value_is_non_increasing_in_the_rate() {
+            let payment = Money::agnostic(1_000.0).unwrap();
+            for g in [-0.3, 0.0, 0.02, 0.5] {
+                for n in [1.0, 2.0, 12.0, 30.0] {
+                    let periods = Period::new(n).unwrap();
+                    let pv = |r: f64| {
+                        annuity::growing_present_value(rate(r), growth(g), periods, payment)
+                            .unwrap()
+                            .value()
+                    };
+                    // A fine grid straddling `r = g`, where the limit branch lives.
+                    let mut previous = f64::INFINITY;
+                    for step in -2_000..=2_000 {
+                        let r = g + f64::from(step) * 1e-11;
+                        let current = pv(r);
+                        assert!(
+                            current <= previous,
+                            "PV rose to {current} from {previous} at r = {r} (g = {g}, n = {n})",
+                        );
+                        previous = current;
+                    }
+                    // …and the far field either side of it.
+                    let mut previous = f64::INFINITY;
+                    for r in [-0.9, -0.5, -0.02, 0.0, 0.02, 0.5, 5.0, 100.0] {
+                        let current = pv(r);
+                        assert!(
+                            current <= previous,
+                            "PV rose at rate {r} (g = {g}, n = {n})",
+                        );
+                        previous = current;
+                    }
+                }
+            }
+        }
+
+        /// The inverses carry the currency of the amount they are given, like every
+        /// other monetary operation (ADR-0034). The two scalar solves return a period
+        /// count and a rate, so they carry none — which is the point of ADR-0057.
+        #[test]
+        fn the_solved_payment_keeps_the_present_value_currency() {
+            let present = Money::new(979.318, Currency::Usd).unwrap();
+            assert_eq!(
+                annuity::growing_payment(
+                    rate(0.05),
+                    growth(0.02),
+                    Period::new(12.0).unwrap(),
+                    present,
+                )
+                .unwrap()
+                .currency(),
+                Currency::Usd,
+            );
+        }
+
+        /// The growing solves need no turbofish — `Growth<P>` names the periodicity —
+        /// where the level `annuity::rate` does. Pinned so the ergonomic difference is
+        /// deliberate rather than accidental: this compiles with `P` inferred.
+        #[test]
+        fn the_growing_rate_solve_infers_its_periodicity() {
+            let r: Rate<Monthly> = annuity::growing_rate(
+                Growth(Rate::new(0.02).unwrap()),
+                Period::new(12.0).unwrap(),
+                pmt(100.0),
+                PresentValue(Money::agnostic(979.318).unwrap()),
+            )
+            .unwrap();
+            assert!(approx(r.value(), 0.05, 1e-4));
         }
     }
 }

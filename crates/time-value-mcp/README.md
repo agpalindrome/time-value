@@ -20,7 +20,8 @@ the core library stays synchronous.
 | `annuity_payment`, `annuity_periods`, `annuity_rate` | solve an annuity for payment / periods / rate, from a present or future value (`annuity_payment` from a future value is the sinking-fund payment) |
 | `annuity_perpetuity`, `annuity_growing_perpetuity` | present value of a (growing) perpetuity |
 | `annuity_growing_present_value`, `annuity_growing_future_value` | finite growing annuity — a payment that grows each period (the rate need not exceed the growth) |
-| `annuity_due_present_value`, `annuity_due_future_value`, `annuity_due_payment`, `annuity_due_perpetuity` | annuity-due (start-of-period) |
+| `annuity_growing_payment`, `annuity_growing_periods`, `annuity_growing_rate` | solve a growing annuity for its first payment / periods / rate. Present-anchored only: a growing annuity's *future* value has no closed-form inverse in the term |
+| `annuity_due_present_value`, `annuity_due_future_value`, `annuity_due_payment`, `annuity_due_periods`, `annuity_due_rate`, `annuity_due_perpetuity` | annuity-due (start-of-period), with the same three solves from either anchor |
 | `annuity_growing_due_present_value`, `annuity_growing_due_future_value`, `annuity_growing_due_perpetuity` | finite growing annuity-due, and the growing perpetuity-due |
 | `rate_effective_annual`, `rate_convert`, `rate_from_nominal`, `rate_nominal` | rate conversions (each takes a periodicity) |
 | `amortize` | an amortization schedule (array of rows) from a term or a level payment |

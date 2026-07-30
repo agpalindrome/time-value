@@ -10,6 +10,17 @@
   [ADR-0054](0054-numeric-robustness-of-the-core-operations.md) (the residual
   scale), [ADR-0045](0045-make-illegal-states-unrepresentable.md)
 
+> **Amended (2026-07-30) by [ADR-0063](0063-annuity-due-solves-and-growing-inverses.md).**
+> The constancy table below covers the two *ordinary* annuity factors, which was the
+> whole surface when this was written. ADR-0063 adds solves over the annuity-due and
+> growing factors and extends the table to all six, deriving each row from two exact
+> identities (`a_due(r,n) = 1 + a(r,n−1)`, `s_due(r,n) = s(r,n+1) − 1`) rather than by
+> inspection. The headline result is that the `(1 + r)` scaling **moves** the
+> single-period degeneracy: `annuity::due::rate` needs the guard `annuity::rate` does
+> not, and `annuity::due::rate_from_future` needs none where
+> `annuity::rate_from_future` does. The reporting rule below is unchanged and is now
+> shared by both guards.
+
 ## Context
 
 `bracket_and_bisect` scans outward from `1 + r = 1e-4`, i.e. `r = −0.9999`, and

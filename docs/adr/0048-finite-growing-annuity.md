@@ -12,6 +12,14 @@
   [ADR-0045](0045-make-illegal-states-unrepresentable.md) (testing and design
   discipline)
 
+> **Amended (2026-07-30) by [ADR-0063](0063-annuity-due-solves-and-growing-inverses.md).**
+> This ADR adds the growing annuity's *values* only. ADR-0063 adds the inverses of its
+> present value — `growing_payment`, `growing_periods`, `growing_rate` — and records
+> why the future-anchored ones are absent: solving the growing *future* value for the
+> term means solving a difference of two exponentials in `n`, which has no closed
+> form. It also arranges `growing_periods` as a ratio of two `ln1p`s, so that solve
+> needs none of the `r ≈ g` band this ADR's Consequences note as a trade-off.
+
 ## Context
 
 The [`annuity`](../../crates/time_value/src/annuity.rs) module models a payment

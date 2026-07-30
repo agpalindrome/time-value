@@ -5,7 +5,9 @@
 //! each other, net present value is monotone in the discount rate and collapses
 //! to the plain sum at a zero rate, the internal rate of return zeroes the net
 //! present value, the annuity payment inverts the annuity present value (for both
-//! ordinary and annuity-due), an amortization schedule conserves the principal it
+//! ordinary and annuity-due), each annuity-due and growing solve recovers the
+//! argument that produced its input, an amortization schedule conserves the
+//! principal it
 //! repays, currency rounding is idempotent, the dated XNPV agrees with the
 //! periodic NPV on whole-year offsets, `Money`'s arithmetic obeys the usual
 //! algebraic laws — `try_sum` is the `try_add` fold, `abs` and `signum` decompose an
@@ -636,6 +638,200 @@ proptest! {
         let due = annuity::due::growing_perpetuity(r, g, payment).unwrap().value();
         let scaled = ordinary * (1.0 + rate);
         prop_assert!(close(due, scaled, 1e-9 * scaled.abs()));
+    }
+
+    /// The annuity-**due** period solves invert the two due values (ADR-0063):
+    /// pricing a start-of-period stream and then asking how many payments it took
+    /// recovers the term, from either end of the horizon.
+    ///
+    /// **The tolerance is derived, and it is what fixes the ranges.** A period solve
+    /// converts a *relative* error in the value into an *absolute* error in the term
+    /// through the condition number `C = value / (d value / dn)`, and `C` grows
+    /// without bound as the value saturates: `C = ((1+r)ⁿ − 1)/ln(1+r)` for the
+    /// present anchor (large at a high rate over a long term) and
+    /// `C = (1 − (1+r)⁻ⁿ)/ln(1+r)` for the future one (large at a *negative* rate
+    /// over a long term). Over `r ∈ [−0.2, 0.3]` and `n ≤ 20` the worse of the two is
+    /// `720`, so the forward value's few ULP (`9e-16` relative) becomes about
+    /// `6.5e-13` of term. `1e-6` absolute is that bound with six orders of margin;
+    /// widening the ranges to `r ∈ [−0.5, 0.5]`, `n ≤ 60` would push `C` past `1e10`
+    /// and the honest tolerance with it, which is why they are not widened.
+    #[test]
+    fn due_periods_inverts_the_due_values(
+        payment in 1.0f64..1e5,
+        rate in -0.2f64..0.3,
+        periods in 1.0f64..20.0,
+    ) {
+        use time_value::{annuity, FutureValue, Payment, Period, PresentValue};
+
+        let r = Rate::<Monthly>::new(rate).unwrap();
+        let n = Period::new(periods).unwrap();
+        let pmt = Money::agnostic(payment).unwrap();
+
+        let present = annuity::due::present_value(r, n, pmt).unwrap();
+        let recovered = annuity::due::periods(r, Payment(pmt), PresentValue(present)).unwrap();
+        prop_assert!(close(recovered.value(), periods, 1e-6));
+
+        let future = annuity::due::future_value(r, n, pmt).unwrap();
+        let recovered =
+            annuity::due::periods_from_future(r, Payment(pmt), FutureValue(future)).unwrap();
+        prop_assert!(close(recovered.value(), periods, 1e-6));
+    }
+
+    /// The annuity-**due** rate solves invert the two due values (ADR-0063).
+    ///
+    /// **The tolerance is derived** the way ADR-0056's is. A root is accepted when the
+    /// residual is within `1e-9` of the scale `|priced| + |target| = 2·PV`, so the
+    /// solve pins the rate only to `2e-9·PV / |dPV/dr|`. That ratio is worst at the
+    /// *shortest* term, where the factor barely responds to the rate: over
+    /// `r ∈ [−0.5, 0.5]` with `n ≥ 2` it peaks at about `7.4e-9` (at `r ≈ 0.5, n ≈ 2`),
+    /// and the future-anchored solve peaks lower, at `3.0e-9`. `1e-7` absolute clears
+    /// the worse of the two by 13×. It cannot be tightened much further without
+    /// asserting more precision than the solver's own root test delivers.
+    ///
+    /// `n` starts at `2` for the present anchor because `n = 1` is the term where the
+    /// due present-value factor is *constant* in the rate, so the solve correctly
+    /// refuses it (`IndeterminateRate`) — the degeneracy the unit tests pin. The
+    /// future anchor has no such term, so it is generated from `1`.
+    #[test]
+    fn due_rate_inverts_the_due_values(
+        payment in 1.0f64..1e5,
+        rate in -0.5f64..0.5,
+        periods in 2.0f64..60.0,
+    ) {
+        use time_value::{annuity, FutureValue, Payment, Period, PresentValue};
+
+        let r = Rate::<Monthly>::new(rate).unwrap();
+        let n = Period::new(periods).unwrap();
+        let pmt = Money::agnostic(payment).unwrap();
+
+        let present = annuity::due::present_value(r, n, pmt).unwrap();
+        let recovered =
+            annuity::due::rate::<Monthly>(n, Payment(pmt), PresentValue(present)).unwrap();
+        prop_assert!(close(recovered.value(), rate, 1e-7));
+
+        let future = annuity::due::future_value(r, n, pmt).unwrap();
+        let recovered =
+            annuity::due::rate_from_future::<Monthly>(n, Payment(pmt), FutureValue(future))
+                .unwrap();
+        prop_assert!(close(recovered.value(), rate, 1e-7));
+    }
+
+    /// A single start-of-period contribution reaching a target is a *determined* rate
+    /// solve — `r = FV/PMT − 1` — where the ordinary sinking-fund rate solve on the
+    /// same term is [indeterminate](time_value::TvmError::IndeterminateRate). The due
+    /// future-value factor is `s(r, n + 1) − 1`, which at `n = 1` is `1 + r`, so the
+    /// `n = 1` row of ADR-0056's constancy table simply is not there (ADR-0063).
+    ///
+    /// The tolerance is derived from the identity rather than a derivative: the factor
+    /// *is* `1 + r`, so the residual tolerance `1e-9·(FV + PMT)` over the derivative
+    /// `PMT` pins the rate to `1e-9·(2 + r)`, at most `3e-9` over this range. `1e-7`
+    /// carries 33×.
+    #[test]
+    fn a_single_period_due_sinking_fund_rate_is_determined(
+        payment in 1.0f64..1e5,
+        rate in -0.5f64..1.0,
+    ) {
+        use time_value::{annuity, FutureValue, Payment, Period};
+
+        let one = Period::new(1.0).unwrap();
+        let pmt = Money::agnostic(payment).unwrap();
+        let future = Money::agnostic(payment * (1.0 + rate)).unwrap();
+
+        let recovered =
+            annuity::due::rate_from_future::<Monthly>(one, Payment(pmt), FutureValue(future))
+                .unwrap();
+        prop_assert!(close(recovered.value(), rate, 1e-7));
+    }
+
+    /// `growing_payment` inverts `growing_present_value` (ADR-0063).
+    ///
+    /// **The tolerance is derived**, and it is the sinking fund's argument again: the
+    /// round trip multiplies by the growing present-value factor and then divides by
+    /// the *identical* factor — the same private helper at the same arguments — so the
+    /// error is two `f64` roundings, about `4.5e-16` relative. Nothing amplifies it,
+    /// because the factor is a positive number multiplied out and divided back
+    /// whatever its magnitude. `1e-9` relative is that bound with six orders of
+    /// margin, so the ranges can be as wide as the arithmetic allows: the largest
+    /// value reachable here is about `7e160`, comfortably finite.
+    #[test]
+    fn growing_payment_inverts_the_growing_present_value(
+        payment in 1.0f64..1e5,
+        rate in -0.9f64..1.0,
+        growth in -0.9f64..1.0,
+        periods in 1.0f64..120.0,
+    ) {
+        use time_value::{annuity, Growth, Period};
+
+        let r = Rate::<Monthly>::new(rate).unwrap();
+        let g = Growth(Rate::<Monthly>::new(growth).unwrap());
+        let n = Period::new(periods).unwrap();
+        let pmt = Money::agnostic(payment).unwrap();
+
+        let present = annuity::growing_present_value(r, g, n, pmt).unwrap();
+        let recovered = annuity::growing_payment(r, g, n, present).unwrap();
+        prop_assert!(close(recovered.value(), payment, 1e-9 * payment));
+    }
+
+    /// `growing_periods` inverts `growing_present_value` in the term (ADR-0063).
+    ///
+    /// **The tolerance is derived**, on the same condition-number argument as the due
+    /// period solves, with one extra source of ill-conditioning: when the rate exceeds
+    /// the growth the present value saturates towards the growing-perpetuity ceiling
+    /// `PMT/(r − g)`, so `C` grows with the *spread* as well as with the term. Over
+    /// `r, g ∈ [−0.2, 0.3]` and `n ≤ 20` the measured worst case is `3.1e4` (at the
+    /// widest spread and the longest term), giving about `2.8e-11` of term for a
+    /// forward value carrying a few ULP. `1e-6` absolute is four orders above that.
+    /// Extending the term to `n ≤ 40` alone raises `C` to `4.2e8` — `3.7e-7`, within a
+    /// factor of three of the tolerance — which is why `n` stops at `20`.
+    #[test]
+    fn growing_periods_inverts_the_growing_present_value(
+        payment in 1.0f64..1e5,
+        rate in -0.2f64..0.3,
+        growth in -0.2f64..0.3,
+        periods in 1.0f64..20.0,
+    ) {
+        use time_value::{annuity, Growth, Payment, Period, PresentValue};
+
+        let r = Rate::<Monthly>::new(rate).unwrap();
+        let g = Growth(Rate::<Monthly>::new(growth).unwrap());
+        let n = Period::new(periods).unwrap();
+        let pmt = Money::agnostic(payment).unwrap();
+
+        let present = annuity::growing_present_value(r, g, n, pmt).unwrap();
+        let recovered = annuity::growing_periods(r, g, Payment(pmt), PresentValue(present)).unwrap();
+        prop_assert!(close(recovered.value(), periods, 1e-6));
+    }
+
+    /// `growing_rate` inverts `growing_present_value` in the rate (ADR-0063) — and
+    /// this is the property that pins the operation's well-posedness, since the worry
+    /// with a growing rate solve is that the factor depends on the *spread* `r − g`
+    /// and so might not be monotone in `r` alone. It is: written as the sum
+    /// `Σ (1 + g)^(k−1)·(1 + r)^(−k)`, every term strictly decreases in `r` with `g`
+    /// fixed, so the root is unique and the solve recovers whichever rate produced the
+    /// value — including rates below the growth.
+    ///
+    /// **The tolerance is derived** exactly as the due rate solve's: the residual
+    /// tolerance `1e-9·2·PV` over `|dPV/dr|`, worst at the shortest term, measures
+    /// `3.0e-9` over `r, g ∈ [−0.5, 0.5]` and `n ≥ 1`. `1e-7` clears it by 33×. Unlike
+    /// the due present solve there is no excluded term: the growing factor varies with
+    /// the rate at every `n ≥ 1`.
+    #[test]
+    fn growing_rate_inverts_the_growing_present_value(
+        payment in 1.0f64..1e5,
+        rate in -0.5f64..0.5,
+        growth in -0.5f64..0.5,
+        periods in 1.0f64..60.0,
+    ) {
+        use time_value::{annuity, Growth, Payment, Period, PresentValue};
+
+        let r = Rate::<Monthly>::new(rate).unwrap();
+        let g = Growth(Rate::<Monthly>::new(growth).unwrap());
+        let n = Period::new(periods).unwrap();
+        let pmt = Money::agnostic(payment).unwrap();
+
+        let present = annuity::growing_present_value(r, g, n, pmt).unwrap();
+        let recovered = annuity::growing_rate(g, n, Payment(pmt), PresentValue(present)).unwrap();
+        prop_assert!(close(recovered.value(), rate, 1e-7));
     }
 
     /// As the term grows without bound the growing annuity-**due** approaches the

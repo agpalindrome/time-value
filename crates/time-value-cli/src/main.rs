@@ -6,7 +6,9 @@
 //! value, IRR, MIRR, and the dated XNPV/XIRR), `single-sum` (present/future value
 //! and the solve-for `nper`/`rate` inverses), `annuity` (ordinary, annuity-`due`,
 //! perpetuity, and growing forms, plus the `payment`/`nper`/`rate` solves — each
-//! from a present or a future value), `rate` (conversions
+//! from a present or a future value for the ordinary and `due` groups, and from a
+//! present value in the `growing` group, whose future-anchored solves have no closed
+//! form), `rate` (conversions
 //! between periodicities and nominal/effective quotes — the only family that
 //! takes a periodicity), `continuous` (continuous compounding at a force of
 //! interest — `fv`/`pv` over a real-number `years` span, plus the
@@ -368,6 +370,37 @@ enum AnnuityDueCommand {
         #[arg(long, allow_hyphen_values = true)]
         future: Option<f64>,
     },
+    /// Solve for the number of level start-of-period payments, from a present or
+    /// future value.
+    Nper {
+        #[arg(long, allow_hyphen_values = true)]
+        rate: f64,
+        /// The payment made at the start of each period.
+        #[arg(long, allow_hyphen_values = true)]
+        payment: f64,
+        /// Solve from this present value (mutually exclusive with --future).
+        #[arg(long, allow_hyphen_values = true)]
+        present: Option<f64>,
+        /// Solve from this future value (mutually exclusive with --present).
+        #[arg(long, allow_hyphen_values = true)]
+        future: Option<f64>,
+    },
+    /// Solve for the per-period rate of an annuity-due, from a present or future
+    /// value. From a present value the term must exceed one period: a single
+    /// start-of-period payment is not discounted at all, so every rate satisfies it.
+    Rate {
+        #[arg(long, allow_hyphen_values = true)]
+        periods: f64,
+        /// The payment made at the start of each period.
+        #[arg(long, allow_hyphen_values = true)]
+        payment: f64,
+        /// Solve from this present value (mutually exclusive with --future).
+        #[arg(long, allow_hyphen_values = true)]
+        present: Option<f64>,
+        /// Solve from this future value (mutually exclusive with --present).
+        #[arg(long, allow_hyphen_values = true)]
+        future: Option<f64>,
+    },
     /// Present value of a level perpetuity-due (a payment at the start of every
     /// period, forever).
     Perpetuity {
@@ -448,6 +481,52 @@ enum AnnuityGrowingCommand {
         /// The first payment (at the start of period 1, i.e. today).
         #[arg(long, allow_hyphen_values = true)]
         payment: f64,
+    },
+    /// Solve for the first payment of a growing annuity that amortises a present
+    /// value. Each later payment is (1 + growth) times the one before.
+    Payment {
+        #[arg(long, allow_hyphen_values = true)]
+        rate: f64,
+        /// The per-period growth rate of the payment (may exceed --rate).
+        #[arg(long, allow_hyphen_values = true)]
+        growth: f64,
+        #[arg(long, allow_hyphen_values = true)]
+        periods: f64,
+        /// Amortise this present value.
+        #[arg(long, allow_hyphen_values = true)]
+        present: f64,
+    },
+    /// Solve for the number of growing payments that amortise a present value. When
+    /// the rate exceeds the growth the present value is capped by the growing
+    /// perpetuity (payment / (rate - growth)); a target at or above that cap is
+    /// reached by no finite term.
+    Nper {
+        #[arg(long, allow_hyphen_values = true)]
+        rate: f64,
+        /// The per-period growth rate of the payment (may exceed --rate).
+        #[arg(long, allow_hyphen_values = true)]
+        growth: f64,
+        /// The first payment (at the end of period 1).
+        #[arg(long, allow_hyphen_values = true)]
+        payment: f64,
+        /// Amortise this present value.
+        #[arg(long, allow_hyphen_values = true)]
+        present: f64,
+    },
+    /// Solve for the per-period rate at which growing payments amortise a present
+    /// value.
+    Rate {
+        /// The per-period growth rate of the payment.
+        #[arg(long, allow_hyphen_values = true)]
+        growth: f64,
+        #[arg(long, allow_hyphen_values = true)]
+        periods: f64,
+        /// The first payment (at the end of period 1).
+        #[arg(long, allow_hyphen_values = true)]
+        payment: f64,
+        /// Amortise this present value.
+        #[arg(long, allow_hyphen_values = true)]
+        present: f64,
     },
 }
 
@@ -838,43 +917,26 @@ fn run_annuity(command: AnnuityCommand, currency: Currency) -> Result<ScalarOutp
             payment,
             present,
             future,
-        } => {
-            let n = match anchor(present, future)? {
-                Anchor::Present(p) => annuity::periods(
-                    rate(r)?,
-                    Payment(money(payment, currency)?),
-                    PresentValue(money(p, currency)?),
-                ),
-                Anchor::Future(f) => annuity::periods_from_future(
-                    rate(r)?,
-                    Payment(money(payment, currency)?),
-                    FutureValue(money(f, currency)?),
-                ),
-            }
-            .map_err(|e| anyhow!("number of periods: {e}"))?;
-            plain_out(n.value())
-        }
+        } => solved_periods(
+            r,
+            payment,
+            anchor(present, future)?,
+            currency,
+            (annuity::periods, annuity::periods_from_future),
+        )?,
         AnnuityCommand::Rate {
             periods: n,
             payment,
             present,
             future,
-        } => {
-            let r = match anchor(present, future)? {
-                Anchor::Present(p) => annuity::rate::<Per>(
-                    period(n)?,
-                    Payment(money(payment, currency)?),
-                    PresentValue(money(p, currency)?),
-                ),
-                Anchor::Future(f) => annuity::rate_from_future::<Per>(
-                    period(n)?,
-                    Payment(money(payment, currency)?),
-                    FutureValue(money(f, currency)?),
-                ),
-            }
-            .context("no rate solves these inputs")?;
-            plain_out(r.value())
-        }
+        } => solved_rate(
+            n,
+            payment,
+            anchor(present, future)?,
+            currency,
+            (annuity::rate::<Per>, annuity::rate_from_future::<Per>),
+            "annuity rate",
+        )?,
         AnnuityCommand::Perpetuity { rate: r, payment } => {
             let pv = annuity::perpetuity(rate(r)?, money(payment, currency)?)
                 .context("perpetuity diverges (rate must exceed 0)")?;
@@ -929,8 +991,96 @@ fn level_payment(
     Ok(money_out(payment))
 }
 
+/// Solve for the number of level payments from whichever value the caller anchored
+/// to — the second of ADR-0028 §2's anchored pairs, shared by `annuity nper` and
+/// `annuity due nper` (ADR-0063).
+///
+/// The two core functions differ in the *role* their amount carries
+/// ([`PresentValue`] against [`FutureValue`]), so they cannot share one `fn` pointer
+/// type the way [`level_payment`]'s pair does; taking them as two generic function
+/// arguments serves the same purpose. Extracting this is what leaves room in
+/// `run_annuity_due` for the two new arms without either dispatcher growing past the
+/// workspace's function-length lint.
+type PeriodsFromPresent = fn(Rate<Per>, Payment, PresentValue) -> Result<Period<Per>, TvmError>;
+type PeriodsFromFuture = fn(Rate<Per>, Payment, FutureValue) -> Result<Period<Per>, TvmError>;
+type RateFromPresent = fn(Period<Per>, Payment, PresentValue) -> Result<Rate<Per>, TvmError>;
+type RateFromFuture = fn(Period<Per>, Payment, FutureValue) -> Result<Rate<Per>, TvmError>;
+
+fn solved_periods(
+    r: f64,
+    payment: f64,
+    anchor: Anchor,
+    currency: Currency,
+    (from_present, from_future): (PeriodsFromPresent, PeriodsFromFuture),
+) -> Result<ScalarOutput> {
+    let (rate, payment) = (rate(r)?, Payment(money(payment, currency)?));
+    let periods = match anchor {
+        Anchor::Present(p) => from_present(rate, payment, PresentValue(money(p, currency)?)),
+        Anchor::Future(f) => from_future(rate, payment, FutureValue(money(f, currency)?)),
+    }
+    .map_err(|e| anyhow!("number of periods: {e}"))?;
+    Ok(plain_out(periods.value()))
+}
+
+/// Solve for the per-period rate from whichever value the caller anchored to — the
+/// third anchored pair, shared by `annuity rate` and `annuity due rate` (ADR-0063).
+///
+/// The message **interpolates** the library error rather than replacing it with a
+/// static "no rate solves these inputs", because these two solves are exactly where
+/// that sentence can be false: on a degenerate term the answer is that *every* rate
+/// solves the inputs ([`TvmError::IndeterminateRate`]), which a static context would
+/// invert. This is the case `main`'s comment describes — the library error is more
+/// specific than any fixed string — and the shape [`level_payment`] already uses
+/// (ADR-0052, ADR-0056, ADR-0063).
+fn solved_rate(
+    n: f64,
+    payment: f64,
+    anchor: Anchor,
+    currency: Currency,
+    (from_present, from_future): (RateFromPresent, RateFromFuture),
+    label: &str,
+) -> Result<ScalarOutput> {
+    let (periods, payment) = (period(n)?, Payment(money(payment, currency)?));
+    let rate = match anchor {
+        Anchor::Present(p) => from_present(periods, payment, PresentValue(money(p, currency)?)),
+        Anchor::Future(f) => from_future(periods, payment, FutureValue(money(f, currency)?)),
+    }
+    .map_err(|e| anyhow!("{label}: {e}"))?;
+    Ok(plain_out(rate.value()))
+}
+
+/// A core growing-annuity *value*: present or future, ordinary or due. All four take
+/// the same four arguments, which is what lets one helper carry every arm of the
+/// `growing` group's value half and leave the dispatcher room for the three solves
+/// (ADR-0063).
+type GrowingValue = fn(Rate<Per>, Growth<Per>, Period<Per>, Money) -> Result<Money, TvmError>;
+
+/// Evaluate one of the four growing-annuity values.
+fn growing_value(
+    r: f64,
+    growth: f64,
+    n: f64,
+    payment: f64,
+    currency: Currency,
+    value: GrowingValue,
+) -> Result<ScalarOutput> {
+    Ok(money_out(value(
+        rate(r)?,
+        Growth(rate(growth)?),
+        period(n)?,
+        money(payment, currency)?,
+    )?))
+}
+
 /// Dispatch the `annuity growing` subcommands — the finite growing annuity in all
-/// four forms (present/future × ordinary/due), ADR-0048/0049.
+/// four forms (present/future × ordinary/due), ADR-0048/0049, plus the three
+/// inverses of its present value (ADR-0063).
+///
+/// The solves take `--present` alone rather than ADR-0028 §2's anchored
+/// `--present`/`--future` pair, because only the present-anchored inverses exist: a
+/// growing annuity's future value differences *two* exponentials, so solving it for
+/// the term has no closed form (ADR-0063). Should that solve ever arrive, adding
+/// `--future` is the same additive relaxation `annuity payment` made in ADR-0062.
 #[allow(clippy::needless_pass_by_value)]
 fn run_annuity_growing(command: AnnuityGrowingCommand, currency: Currency) -> Result<ScalarOutput> {
     Ok(match command {
@@ -939,45 +1089,53 @@ fn run_annuity_growing(command: AnnuityGrowingCommand, currency: Currency) -> Re
             growth,
             periods: n,
             payment,
-        } => money_out(annuity::growing_present_value(
-            rate(r)?,
-            Growth(rate(growth)?),
-            period(n)?,
-            money(payment, currency)?,
-        )?),
+        } => growing_value(
+            r,
+            growth,
+            n,
+            payment,
+            currency,
+            annuity::growing_present_value,
+        )?,
         AnnuityGrowingCommand::Fv {
             rate: r,
             growth,
             periods: n,
             payment,
-        } => money_out(annuity::growing_future_value(
-            rate(r)?,
-            Growth(rate(growth)?),
-            period(n)?,
-            money(payment, currency)?,
-        )?),
+        } => growing_value(
+            r,
+            growth,
+            n,
+            payment,
+            currency,
+            annuity::growing_future_value,
+        )?,
         AnnuityGrowingCommand::DuePv {
             rate: r,
             growth,
             periods: n,
             payment,
-        } => money_out(annuity::due::growing_present_value(
-            rate(r)?,
-            Growth(rate(growth)?),
-            period(n)?,
-            money(payment, currency)?,
-        )?),
+        } => growing_value(
+            r,
+            growth,
+            n,
+            payment,
+            currency,
+            annuity::due::growing_present_value,
+        )?,
         AnnuityGrowingCommand::DueFv {
             rate: r,
             growth,
             periods: n,
             payment,
-        } => money_out(annuity::due::growing_future_value(
-            rate(r)?,
-            Growth(rate(growth)?),
-            period(n)?,
-            money(payment, currency)?,
-        )?),
+        } => growing_value(
+            r,
+            growth,
+            n,
+            payment,
+            currency,
+            annuity::due::growing_future_value,
+        )?,
         AnnuityGrowingCommand::DuePerpetuity {
             rate: r,
             growth,
@@ -991,10 +1149,88 @@ fn run_annuity_growing(command: AnnuityGrowingCommand, currency: Currency) -> Re
             .context("growing perpetuity-due diverges (rate must exceed growth)")?;
             money_out(pv)
         }
+        AnnuityGrowingCommand::Payment {
+            rate: r,
+            growth,
+            periods: n,
+            present,
+        } => growing_payment(r, growth, n, present, currency)?,
+        AnnuityGrowingCommand::Nper {
+            rate: r,
+            growth,
+            payment,
+            present,
+        } => growing_periods(r, growth, payment, present, currency)?,
+        AnnuityGrowingCommand::Rate {
+            growth,
+            periods: n,
+            payment,
+            present,
+        } => growing_rate(growth, n, payment, present, currency)?,
     })
 }
 
-/// Dispatch the `annuity due` subcommands.
+/// Solve for the first payment of a growing annuity that amortises `present`
+/// (ADR-0063). One helper per solve keeps `run_annuity_growing`'s arms to a line
+/// each, which is what holds the group's dispatcher — now eight arms — inside the
+/// function-length lint.
+fn growing_payment(
+    r: f64,
+    growth: f64,
+    n: f64,
+    present: f64,
+    currency: Currency,
+) -> Result<ScalarOutput> {
+    let payment = annuity::growing_payment(
+        rate(r)?,
+        Growth(rate(growth)?),
+        period(n)?,
+        money(present, currency)?,
+    )
+    .map_err(|e| anyhow!("growing annuity payment: {e}"))?;
+    Ok(money_out(payment))
+}
+
+/// Solve for the number of growing payments that amortise `present` (ADR-0063).
+fn growing_periods(
+    r: f64,
+    growth: f64,
+    payment: f64,
+    present: f64,
+    currency: Currency,
+) -> Result<ScalarOutput> {
+    let periods = annuity::growing_periods(
+        rate(r)?,
+        Growth(rate(growth)?),
+        Payment(money(payment, currency)?),
+        PresentValue(money(present, currency)?),
+    )
+    .map_err(|e| anyhow!("number of periods: {e}"))?;
+    Ok(plain_out(periods.value()))
+}
+
+/// Solve for the per-period rate at which growing payments amortise `present`
+/// (ADR-0063).
+fn growing_rate(
+    growth: f64,
+    n: f64,
+    payment: f64,
+    present: f64,
+    currency: Currency,
+) -> Result<ScalarOutput> {
+    let solved = annuity::growing_rate(
+        Growth(rate(growth)?),
+        period(n)?,
+        Payment(money(payment, currency)?),
+        PresentValue(money(present, currency)?),
+    )
+    .map_err(|e| anyhow!("growing annuity rate: {e}"))?;
+    Ok(plain_out(solved.value()))
+}
+
+/// Dispatch the `annuity due` subcommands — the values, and the three solves, each
+/// anchored to a present or a future value exactly as the ordinary group's are
+/// (ADR-0063).
 #[allow(clippy::needless_pass_by_value)]
 fn run_annuity_due(command: AnnuityDueCommand, currency: Currency) -> Result<ScalarOutput> {
     Ok(match command {
@@ -1028,6 +1264,34 @@ fn run_annuity_due(command: AnnuityDueCommand, currency: Currency) -> Result<Sca
             currency,
             (annuity::due::payment, annuity::due::payment_from_future),
             "annuity-due payment",
+        )?,
+        AnnuityDueCommand::Nper {
+            rate: r,
+            payment,
+            present,
+            future,
+        } => solved_periods(
+            r,
+            payment,
+            anchor(present, future)?,
+            currency,
+            (annuity::due::periods, annuity::due::periods_from_future),
+        )?,
+        AnnuityDueCommand::Rate {
+            periods: n,
+            payment,
+            present,
+            future,
+        } => solved_rate(
+            n,
+            payment,
+            anchor(present, future)?,
+            currency,
+            (
+                annuity::due::rate::<Per>,
+                annuity::due::rate_from_future::<Per>,
+            ),
+            "annuity-due rate",
         )?,
         AnnuityDueCommand::Perpetuity { rate: r, payment } => {
             let pv = annuity::due::perpetuity(rate(r)?, money(payment, currency)?)

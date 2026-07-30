@@ -175,13 +175,14 @@ pub(crate) struct SingleSumRateInput {
     pub currency: Option<Currency>,
 }
 
-/// Input for the `annuity_periods` tool. Provide exactly one of `present` or
-/// `future` (the value the payment stream is anchored to).
+/// Input for the `annuity_periods` and `annuity_due_periods` tools. Provide exactly
+/// one of `present` or `future` (the value the payment stream is anchored to).
 #[derive(Debug, Deserialize, JsonSchema)]
 pub(crate) struct AnnuityPeriodsInput {
     /// Per-period rate.
     pub rate: f64,
-    /// The payment made at the end of each period.
+    /// The payment made at the end of each period (at the *start*, for
+    /// `annuity_due_periods`).
     pub payment: f64,
     /// Solve from this present value (mutually exclusive with `future`).
     #[serde(default)]
@@ -195,13 +196,14 @@ pub(crate) struct AnnuityPeriodsInput {
     pub currency: Option<Currency>,
 }
 
-/// Input for the `annuity_rate` tool. Provide exactly one of `present` or
-/// `future`.
+/// Input for the `annuity_rate` and `annuity_due_rate` tools. Provide exactly one of
+/// `present` or `future`.
 #[derive(Debug, Deserialize, JsonSchema)]
 pub(crate) struct AnnuityRateInput {
     /// Number of periods (may be fractional).
     pub periods: f64,
-    /// The payment made at the end of each period.
+    /// The payment made at the end of each period (at the *start*, for
+    /// `annuity_due_rate`).
     pub payment: f64,
     /// Solve from this present value (mutually exclusive with `future`).
     #[serde(default)]
@@ -326,6 +328,68 @@ pub(crate) struct GrowingAnnuityInput {
     /// period 1 (annuity-due). Each later payment is `(1 + growth)` times the one
     /// before.
     pub payment: f64,
+    /// ISO 4217 currency to denominate the amounts in (e.g. `USD`, `JPY`).
+    /// Omit for currency-agnostic (`XXX`) amounts. An unknown code is rejected.
+    #[serde(default)]
+    pub currency: Option<Currency>,
+}
+
+/// Input for the `annuity_growing_payment` tool (ADR-0063).
+///
+/// Unlike the level [`AnnuityPaymentInput`] there is no `future` anchor: a growing
+/// annuity's inverses exist only from the present value, because its future value
+/// differences two exponentials and has no closed-form inverse in the term.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub(crate) struct GrowingPaymentInput {
+    /// Per-period rate.
+    pub rate: f64,
+    /// The per-period growth rate of the payment (may exceed `rate`).
+    pub growth: f64,
+    /// Number of periods (may be fractional).
+    pub periods: f64,
+    /// Amortise this present value into a growing payment stream.
+    pub present: f64,
+    /// ISO 4217 currency to denominate the amounts in (e.g. `USD`, `JPY`).
+    /// Omit for currency-agnostic (`XXX`) amounts. An unknown code is rejected.
+    #[serde(default)]
+    pub currency: Option<Currency>,
+}
+
+/// Input for the `annuity_growing_periods` tool (ADR-0063). Present-anchored only,
+/// for the reason [`GrowingPaymentInput`] records.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub(crate) struct GrowingPeriodsInput {
+    /// Per-period rate.
+    pub rate: f64,
+    /// The per-period growth rate of the payment (may exceed `rate`).
+    pub growth: f64,
+    /// The first payment, at the end of period 1. Each later payment is
+    /// `(1 + growth)` times the one before.
+    pub payment: f64,
+    /// Amortise this present value. When `rate` exceeds `growth` it must be below the
+    /// growing-perpetuity value `payment / (rate − growth)`, which no finite number of
+    /// payments reaches.
+    pub present: f64,
+    /// ISO 4217 currency to denominate the amounts in (e.g. `USD`, `JPY`).
+    /// Omit for currency-agnostic (`XXX`) amounts. An unknown code is rejected.
+    #[serde(default)]
+    pub currency: Option<Currency>,
+}
+
+/// Input for the `annuity_growing_rate` tool (ADR-0063). Present-anchored only, for
+/// the reason [`GrowingPaymentInput`] records; the rate is what is being solved for,
+/// so only `growth` is supplied.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub(crate) struct GrowingRateInput {
+    /// The per-period growth rate of the payment.
+    pub growth: f64,
+    /// Number of periods (may be fractional).
+    pub periods: f64,
+    /// The first payment, at the end of period 1. Each later payment is
+    /// `(1 + growth)` times the one before.
+    pub payment: f64,
+    /// Amortise this present value.
+    pub present: f64,
     /// ISO 4217 currency to denominate the amounts in (e.g. `USD`, `JPY`).
     /// Omit for currency-agnostic (`XXX`) amounts. An unknown code is rejected.
     #[serde(default)]
