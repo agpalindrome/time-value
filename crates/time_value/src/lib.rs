@@ -63,9 +63,15 @@
 //! conversion ([`Rate::from_nominal_annual`] / [`Rate::nominal_annual`]) is plain
 //! arithmetic and needs no feature.
 //!
+//! [`DatedCashflows`] carries the same four operations the periodic series does —
+//! XNPV, its net *future* value at the series' horizon (the latest date), XIRR, and a
+//! dated modified internal rate of return annualised over the span in years
+//! (`docs/adr/0065-dated-counterparts.md`).
+//!
 //! The optional `alloc` feature (off by default, implied by `std`) adds the owned
-//! [`OwnedCashflows`] series — built from a `Vec` or an iterator — complementing
-//! the borrowed, allocation-free [`Cashflows`] (`docs/adr/0043-owned-cashflows.md`).
+//! [`OwnedCashflows`] and [`OwnedDatedCashflows`] series — built from a `Vec` or an
+//! iterator — complementing the borrowed, allocation-free [`Cashflows`] and
+//! [`DatedCashflows`] (`docs/adr/0043-owned-cashflows.md`, ADR-0065).
 //!
 //! The optional `serde` feature (off by default, `no_std`-compatible) derives
 //! `Serialize`/`Deserialize` for the public value types — bare numbers for the
@@ -82,7 +88,7 @@
 //! The public types are plain data with no interior mutability, so the owned
 //! value types ([`Money`], [`Rate<P>`], [`Currency`], [`TvmError`], the
 //! [`amortization`] types, and the feature-gated [`Period<P>`], [`ContinuousRate`],
-//! [`OwnedCashflows`], …) are **`Send + Sync + 'static`**, and the borrowing views
+//! [`OwnedCashflows`], [`OwnedDatedCashflows`], …) are **`Send + Sync + 'static`**, and the borrowing views
 //! ([`Cashflows<P>`], [`DatedCashflows`]) are **`Send + Sync`** (they are not
 //! `'static` only because they borrow). This is a maintained part of the API — it
 //! lets callers move values across threads, share them by `&`/`Arc`, and hold them
@@ -143,6 +149,15 @@
 [`OwnedCashflows`]: https://docs.rs/time_value/latest/time_value/struct.OwnedCashflows.html
 "
 )]
+// `OwnedDatedCashflows` needs `alloc` *and* a transcendental-math feature, so it has
+// its own condition rather than sharing either block above — two blocks defining the
+// same reference would collide in the default build, where both are active.
+#![cfg_attr(
+    not(all(feature = "alloc", any(feature = "std", feature = "libm"))),
+    doc = "
+[`OwnedDatedCashflows`]: https://docs.rs/time_value/latest/time_value/struct.OwnedDatedCashflows.html
+"
+)]
 // `no_std` unless the `std` feature is enabled — the `std` feature turns this
 // into an ordinary `std` crate so it can use `f64`'s transcendental methods.
 #![cfg_attr(not(feature = "std"), no_std)]
@@ -200,6 +215,7 @@ macro_rules! docs_rs_links {
 [`Cashflows::modified_internal_rate_of_return`]: https://docs.rs/time_value/latest/time_value/struct.Cashflows.html#method.modified_internal_rate_of_return
 [`ContinuousRate`]: https://docs.rs/time_value/latest/time_value/struct.ContinuousRate.html
 [`DatedCashflow`]: https://docs.rs/time_value/latest/time_value/struct.DatedCashflow.html
+[`DatedCashflows::modified_internal_rate_of_return`]: https://docs.rs/time_value/latest/time_value/struct.DatedCashflows.html#method.modified_internal_rate_of_return
 [`continuous`]: https://docs.rs/time_value/latest/time_value/continuous/index.html
 [`continuous::rate`]: https://docs.rs/time_value/latest/time_value/continuous/fn.rate.html
 [`continuous::years`]: https://docs.rs/time_value/latest/time_value/continuous/fn.years.html
@@ -266,6 +282,12 @@ pub use amortization::{Installment, Schedule};
 #[cfg(any(feature = "std", feature = "libm"))]
 #[cfg_attr(docsrs, doc(cfg(any(feature = "std", feature = "libm"))))]
 pub use continuous::ContinuousRate;
+#[cfg(all(feature = "alloc", any(feature = "std", feature = "libm")))]
+#[cfg_attr(
+    docsrs,
+    doc(cfg(all(feature = "alloc", any(feature = "std", feature = "libm"))))
+)]
+pub use dated::OwnedDatedCashflows;
 #[cfg(any(feature = "std", feature = "libm"))]
 #[cfg_attr(docsrs, doc(cfg(any(feature = "std", feature = "libm"))))]
 pub use dated::{DatedCashflow, DatedCashflows};
@@ -420,7 +442,11 @@ pub enum TvmError {
     /// Returned by [`single_sum::periods`], [`annuity::periods_from_future`], and
     /// the continuous solves [`continuous::rate`] / [`continuous::years`], whose
     /// shared domain is that `future / present` and its reciprocal are both positive
-    /// and finite (ADR-0052, ADR-0064). Distinct from
+    /// and finite (ADR-0052, ADR-0064). Also by
+    /// [`DatedCashflows::modified_internal_rate_of_return`] when the series is dated
+    /// entirely on one day and its outflows and inflows do *not* match there, the
+    /// counterpart to the [`IndeterminateRate`](Self::IndeterminateRate) case where
+    /// they do (ADR-0065). Distinct from
     /// [`SolveDidNotConverge`](Self::SolveDidNotConverge), where an answer may
     /// exist but the iteration did not find it: here the closed form proves there
     /// is none.
@@ -437,9 +463,10 @@ pub enum TvmError {
     /// happens when [`annuity::rate_from_future`] is given a single period — one
     /// payment made at the end of period 1 is never compounded, so the future value
     /// is the payment whatever the rate — and the target equals the payment;
-    /// [`annuity::due::rate`] over a single period is the mirror case, and
-    /// [`continuous::rate`] over a zero-length span the continuous one (ADR-0063,
-    /// ADR-0064).
+    /// [`annuity::due::rate`] over a single period is the mirror case,
+    /// [`continuous::rate`] over a zero-length span the continuous one, and
+    /// [`DatedCashflows::modified_internal_rate_of_return`] over a series dated
+    /// entirely on one day the dated one (ADR-0063, ADR-0064, ADR-0065).
     ///
     /// The inputs are under-determined rather than wrong: supply a longer term, or
     /// solve for something the inputs do pin down (ADR-0056). See
@@ -484,9 +511,10 @@ pub enum TvmError {
     /// — the investment whose return is being measured) was given a series with
     /// none, so there is no present value to grow from.
     ///
-    /// Returned by [`Cashflows::modified_internal_rate_of_return`] (ADR-0052).
-    /// Distinct from [`EmptyCashflows`](Self::EmptyCashflows), where there are no
-    /// cashflows at all.
+    /// Returned by [`Cashflows::modified_internal_rate_of_return`] and its dated
+    /// counterpart [`DatedCashflows::modified_internal_rate_of_return`] (ADR-0052,
+    /// ADR-0065). Distinct from [`EmptyCashflows`](Self::EmptyCashflows), where there
+    /// are no cashflows at all.
     #[cfg_attr(
         not(any(feature = "std", feature = "libm")),
         doc = docs_rs_links!()

@@ -3,7 +3,8 @@
 //! A thin calculator over the library's operations (see
 //! `docs/adr/0010-cli-surface.md`, extended by `docs/adr/0028-binary-surface-conventions.md`).
 //! Commands are grouped by relationship family: `series` (net present/future
-//! value, IRR, MIRR, and the dated XNPV/XIRR), `single-sum` (present/future value
+//! value, IRR, MIRR, and their dated counterparts `xnpv`/`xnfv`/`xirr`/`xmirr` over
+//! irregular ISO dates — ADR-0029/0065), `single-sum` (present/future value
 //! and the solve-for `nper`/`rate` inverses), `annuity` (ordinary, annuity-`due`,
 //! perpetuity, and growing forms, plus the `payment`/`nper`/`rate` solves — each
 //! from a present or a future value for the ordinary and `due` groups, and from a
@@ -61,7 +62,7 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     /// Cashflow-series operations: net present/future value, IRR, MIRR, and the
-    /// dated XNPV/XIRR.
+    /// dated XNPV/XNFV/XIRR/XMIRR.
     Series {
         #[command(subcommand)]
         command: SeriesCommand,
@@ -173,6 +174,18 @@ enum SeriesCommand {
         #[arg(value_name = "DATE:AMOUNT", num_args = 1.., required = true)]
         flows: Vec<String>,
     },
+    /// Net future value of cashflows on irregular dates, compounded at an annual
+    /// rate to the series' horizon — its **latest** date, whatever order the flows
+    /// are given in (XNFV). Flows are `DATE:AMOUNT` pairs.
+    Xnfv {
+        /// Annual rate (e.g. 0.1 for 10% per year).
+        #[arg(long, allow_hyphen_values = true)]
+        rate: f64,
+        /// Dated cashflows as `YYYY-MM-DD:AMOUNT` (signed: outflow negative). Every
+        /// flow is compounded to the latest date among them.
+        #[arg(value_name = "DATE:AMOUNT", num_args = 1.., required = true)]
+        flows: Vec<String>,
+    },
     /// Internal rate of return of cashflows on irregular dates (XIRR), as an
     /// annual rate. Flows are `DATE:AMOUNT` pairs.
     Xirr {
@@ -181,6 +194,20 @@ enum SeriesCommand {
         guess: f64,
         /// Dated cashflows as `YYYY-MM-DD:AMOUNT` (signed: outflow negative). The
         /// first date is the valuation reference.
+        #[arg(value_name = "DATE:AMOUNT", num_args = 1.., required = true)]
+        flows: Vec<String>,
+    },
+    /// Modified internal rate of return of cashflows on irregular dates, as an
+    /// annual rate (XMIRR): outflows discounted to the earliest date, inflows
+    /// compounded to the latest, annualised over the years between them.
+    Xmirr {
+        /// Annual finance rate for discounting the outflows.
+        #[arg(long, allow_hyphen_values = true)]
+        finance: f64,
+        /// Annual reinvestment rate for compounding the inflows.
+        #[arg(long, allow_hyphen_values = true)]
+        reinvest: f64,
+        /// Dated cashflows as `YYYY-MM-DD:AMOUNT` (signed: outflow negative).
         #[arg(value_name = "DATE:AMOUNT", num_args = 1.., required = true)]
         flows: Vec<String>,
     },
@@ -840,6 +867,11 @@ fn run_series(command: SeriesCommand, currency: Currency) -> Result<ScalarOutput
             let series = DatedCashflows::new(&dated);
             money_out(series.net_present_value(annual_rate(r)?)?)
         }
+        SeriesCommand::Xnfv { rate: r, flows } => {
+            let dated = dated_flows(&flows, currency)?;
+            let series = DatedCashflows::new(&dated);
+            money_out(series.net_future_value(annual_rate(r)?)?)
+        }
         SeriesCommand::Xirr { guess, flows } => {
             let dated = dated_flows(&flows, currency)?;
             let series = DatedCashflows::new(&dated);
@@ -847,6 +879,21 @@ fn run_series(command: SeriesCommand, currency: Currency) -> Result<ScalarOutput
                 .internal_rate_of_return_from(guess)
                 .context("no internal rate of return found")?;
             plain_out(irr.value())
+        }
+        SeriesCommand::Xmirr {
+            finance,
+            reinvest,
+            flows,
+        } => {
+            let dated = dated_flows(&flows, currency)?;
+            let series = DatedCashflows::new(&dated);
+            // Interpolate the library's message: the degenerate answers here are
+            // "every rate satisfies these inputs" and "none does", which a static
+            // string would have to pick between (ADR-0063, ADR-0065).
+            let mirr = series
+                .modified_internal_rate_of_return(annual_rate(finance)?, annual_rate(reinvest)?)
+                .map_err(|e| anyhow!("modified internal rate of return: {e}"))?;
+            plain_out(mirr.value())
         }
     })
 }

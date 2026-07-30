@@ -15,6 +15,8 @@
 //!   delegate to their `*Wire` struct's derived schema.
 //! - **[`OwnedCashflows`]** → an inlined `array` of [`Money`] (ADR-0060). The
 //!   `schemars` feature implies `alloc`, so the owned series always exists here.
+//! - **`OwnedDatedCashflows`** → an inlined `array` of [`DatedCashflow`] (ADR-0065),
+//!   behind std/libm with the dated types.
 
 use alloc::borrow::Cow;
 use alloc::vec::Vec;
@@ -23,12 +25,14 @@ use schemars::{json_schema, JsonSchema, Schema, SchemaGenerator};
 
 #[cfg(any(feature = "std", feature = "libm"))]
 use crate::wire::DatedCashflowWire;
+#[cfg(any(feature = "std", feature = "libm"))]
+use crate::wire::OwnedDatedCashflowsWire;
 use crate::wire::{FxRateWire, InstallmentWire, MoneyWire, OwnedCashflowsWire};
 use crate::{
     amortization::Installment, Currency, FxRate, Money, OwnedCashflows, Periodicity, Rate,
 };
 #[cfg(any(feature = "std", feature = "libm"))]
-use crate::{ContinuousRate, DatedCashflow, Period};
+use crate::{ContinuousRate, DatedCashflow, OwnedDatedCashflows, Period};
 
 // ---- Bare-number newtypes: a plain `number`, inlined ----------------------
 
@@ -118,6 +122,26 @@ impl<P: Periodicity> JsonSchema for OwnedCashflows<P> {
 
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {
         <OwnedCashflowsWire<'_> as JsonSchema>::json_schema(generator)
+    }
+}
+
+// ---- OwnedDatedCashflows: an array of DatedCashflow, inlined ---------------
+
+#[cfg(any(feature = "std", feature = "libm"))]
+impl JsonSchema for OwnedDatedCashflows {
+    /// Inlined, like `schemars`' own sequence schemas and like the periodic
+    /// [`OwnedCashflows`] above. `DatedCashflow` remains the named definition the
+    /// `items` point at (ADR-0065).
+    fn inline_schema() -> bool {
+        true
+    }
+
+    fn schema_name() -> Cow<'static, str> {
+        Cow::Borrowed("OwnedDatedCashflows")
+    }
+
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        <OwnedDatedCashflowsWire<'_> as JsonSchema>::json_schema(generator)
     }
 }
 

@@ -55,6 +55,19 @@ pub(crate) struct DatedCashflowWire {
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub(crate) struct OwnedCashflowsWire<'a>(pub(crate) alloc::borrow::Cow<'a, [Money]>);
 
+/// `OwnedDatedCashflows` → a bare JSON **array** of `DatedCashflow` in slice order,
+/// which is meaningful order: the first entry is the XNPV's valuation reference
+/// (ADR-0065). The dated sibling of [`OwnedCashflowsWire`], with the same newtype +
+/// `Cow` construction and for the same reasons — one declaration for both derives,
+/// borrowed out and owned in. Gated with its type (`alloc` **and** std/libm, since
+/// `DatedCashflow` itself is).
+#[cfg(all(feature = "alloc", any(feature = "std", feature = "libm")))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+pub(crate) struct OwnedDatedCashflowsWire<'a>(
+    pub(crate) alloc::borrow::Cow<'a, [crate::DatedCashflow]>,
+);
+
 /// `Installment` → `{ period, payment, interest, principal, balance }`.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]

@@ -183,7 +183,8 @@ fn check_conformance(cases: &[Case]) {
     }
 }
 
-/// The series family (`npv`/`nfv`/`irr`/`mirr`/`xnpv`/`xirr`).
+/// The series family (`npv`/`nfv`/`irr`/`mirr` and the dated
+/// `xnpv`/`xnfv`/`xirr`/`xmirr`).
 #[test]
 fn series_output_conforms_to_declared_schema() {
     check_conformance(&[
@@ -208,8 +209,28 @@ fn series_output_conforms_to_declared_schema() {
             args: json!({"rate":0.10,"flows":[{"date":"2020-01-01","amount":-100},{"date":"2021-01-01","amount":110}],"currency":"EUR"}),
         },
         Case {
+            tool: "xnfv",
+            args: json!({"rate":0.10,"flows":[{"date":"2020-01-01","amount":-100},{"date":"2021-01-01","amount":110}],"currency":"EUR"}),
+        },
+        // …and again currency-agnostic, since the `currency` field is optional on the
+        // monetary shape and its absence is the case a schema most easily gets wrong.
+        Case {
+            tool: "xnfv",
+            args: json!({"rate":0.10,"flows":[{"date":"2020-01-01","amount":-100},{"date":"2021-01-01","amount":110}]}),
+        },
+        Case {
             tool: "xirr",
             args: json!({"flows":[{"date":"2020-01-01","amount":-100},{"date":"2021-01-01","amount":110}]}),
+        },
+        Case {
+            tool: "xmirr",
+            args: json!({"finance":0.10,"reinvest":0.12,"flows":[{"date":"2020-01-01","amount":-1000},{"date":"2020-07-01","amount":-500},{"date":"2021-04-01","amount":800},{"date":"2022-01-01","amount":900}]}),
+        },
+        // A negative dated MIRR: the scalar shape must hold for a loss-making series
+        // just as for a profitable one.
+        Case {
+            tool: "xmirr",
+            args: json!({"finance":0.10,"reinvest":0.12,"flows":[{"date":"2020-01-01","amount":-1000},{"date":"2022-01-01","amount":500}]}),
         },
     ]);
 }

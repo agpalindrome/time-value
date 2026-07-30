@@ -1,7 +1,10 @@
 # ADR-0029: Dated cashflows — XNPV / XIRR
 
 - **Status:** Accepted (amended by [0030](0030-shared-day-count-support-crate.md) — the
-  binaries' ACT/365 day-count now lives in a shared crate, not copied into each)
+  binaries' ACT/365 day-count now lives in a shared crate, not copied into each; and by
+  [0065](0065-dated-counterparts.md), which **adds** the dated net future value rejected
+  under *Alternatives considered* below, plus a dated MIRR and an owned
+  `OwnedDatedCashflows`)
 - **Date:** 2026-07-13
 - **Deciders:** Project owner
 
@@ -97,6 +100,10 @@ Excel's XNPV/XIRR. Callers who genuinely hold year-offsets use the core
 - **Raw year-offsets on the CLI/MCP** — trivial but useless for the actual use
   case (irregular calendar dates); rejected in favour of ISO dates + ACT/365.
 - **A dated net *future* value** — XNFV is not a standard function and has no clear
-  reference date to compound to; omitted.
+  reference date to compound to; omitted. **Reversed by
+  [ADR-0065](0065-dated-counterparts.md):** the first half stands and is not decisive
+  (`Cashflows` carries an NFV Excel also lacks), and the second is answered — the
+  horizon is the **latest** offset, which needs no reference date at all, since
+  `Σ CFᵢ (1+r)^(T − tᵢ)` never mentions `t₀`.
 
 [`TvmError::NonFiniteOffset`]: ../../crates/time_value/src/lib.rs

@@ -115,6 +115,61 @@ fn a_serialized_series_conforms_to_its_schema() {
     }
 }
 
+/// The owned **dated** series is an `array` whose items are the `DatedCashflow`
+/// schema — the dated sibling of the test above (ADR-0065). `DatedCashflow` stays the
+/// named definition, since it is a composite rather than a sequence.
+#[test]
+fn owned_dated_cashflows_is_an_array_of_dated_cashflows() {
+    use time_value::OwnedDatedCashflows;
+
+    let schema = schema!(OwnedDatedCashflows);
+    assert_eq!(schema["type"], Value::from("array"));
+
+    let items = &schema["items"];
+    let flow = items["$ref"]
+        .as_str()
+        .and_then(|reference| reference.rsplit('/').next())
+        .and_then(|name| schema["$defs"].get(name))
+        .unwrap_or(items);
+    assert_eq!(flow["type"], Value::from("object"), "items: {items}");
+    assert!(flow["properties"].get("offset_years").is_some());
+    assert!(flow["properties"].get("amount").is_some());
+}
+
+/// The dated schema describes what `serde` actually writes: every element carries
+/// exactly the keys the `DatedCashflow` definition requires, and no others.
+#[cfg(feature = "serde")]
+#[test]
+fn a_serialized_dated_series_conforms_to_its_schema() {
+    use time_value::OwnedDatedCashflows;
+
+    let series = OwnedDatedCashflows::new(vec![
+        DatedCashflow::new(0.0, Money::new(-100.0, Currency::Usd).unwrap()).unwrap(),
+        DatedCashflow::new(1.5, Money::agnostic(60.0).unwrap()).unwrap(),
+    ]);
+    let document = serde_json::to_value(&series).unwrap();
+    let elements = document.as_array().expect("an array, per the schema");
+    assert_eq!(elements.len(), series.len());
+
+    let flow_schema = schema!(DatedCashflow);
+    let required = flow_schema["required"]
+        .as_array()
+        .expect("required array")
+        .iter()
+        .map(|key| key.as_str().expect("a string key"))
+        .collect::<Vec<_>>();
+    for element in elements {
+        let object = element.as_object().expect("an object element");
+        for key in &required {
+            assert!(
+                object.contains_key(*key),
+                "element missing `{key}`: {element}"
+            );
+        }
+        assert_eq!(object.len(), required.len(), "extra keys in {element}");
+    }
+}
+
 #[test]
 fn composite_structs_are_objects_with_their_fields() {
     let fx = schema!(FxRate);

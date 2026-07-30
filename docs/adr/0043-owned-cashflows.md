@@ -1,6 +1,8 @@
 # ADR-0043: Owned cashflows — `OwnedCashflows` behind an `alloc` feature
 
-- **Status:** Accepted
+- **Status:** Accepted (amended by [0060](0060-owned-cashflows-on-the-wire.md) — the
+  wire format it deferred; and by [0065](0065-dated-counterparts.md) — an
+  `OwnedDatedCashflows` built to the same pattern, for the dated series)
 - **Date:** 2026-07-14
 - **Deciders:** Project owner
 - **Follows:** [ADR-0013](0013-core-api-values-and-discrete-operations.md) (the

@@ -95,6 +95,121 @@ fn xnpv_tool_lists_and_computes() {
         .stdout(predicate::str::contains("xirr"));
 }
 
+/// The structured results of a session, keyed by request id.
+fn structured(calls: &str) -> std::collections::HashMap<i64, serde_json::Value> {
+    let output = Command::cargo_bin("time-value-mcp")
+        .unwrap()
+        .write_stdin(session(calls))
+        .output()
+        .expect("run server");
+    assert!(output.status.success(), "server exited non-zero");
+
+    let mut results = std::collections::HashMap::new();
+    for line in String::from_utf8(output.stdout).expect("utf8").lines() {
+        let value: serde_json::Value = serde_json::from_str(line).expect("json-rpc line");
+        if let (Some(id), Some(content)) = (
+            value.get("id").and_then(serde_json::Value::as_i64),
+            value.pointer("/result/structuredContent"),
+        ) {
+            results.insert(id, content.clone());
+        }
+    }
+    results
+}
+
+#[test]
+fn xnfv_tool_compounds_to_the_latest_date() {
+    // The horizon is the latest date, not the last flow listed (ADR-0065), so the
+    // reversed call must return the same amount: −27.8267360… at 10% a year.
+    let sorted = r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"xnfv","arguments":{"rate":0.10,"flows":[{"date":"2020-01-01","amount":-1000},{"date":"2020-07-01","amount":-500},{"date":"2021-04-01","amount":800},{"date":"2022-01-01","amount":900}]}}}"#;
+    let reversed = r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"xnfv","arguments":{"rate":0.10,"flows":[{"date":"2022-01-01","amount":900},{"date":"2021-04-01","amount":800},{"date":"2020-07-01","amount":-500},{"date":"2020-01-01","amount":-1000}]}}}"#;
+    let results = structured(&format!("{sorted}\n{reversed}\n"));
+
+    let value = |id: i64| results[&id]["value"].as_f64().expect("a number");
+    assert!(
+        (value(2) - -27.826_736_031_298_8).abs() < 1e-9,
+        "{} is not the reference −27.8267360312988",
+        value(2),
+    );
+    assert!(
+        (value(2) - value(3)).abs() < 1e-9,
+        "the horizon moved with the order: {} vs {}",
+        value(2),
+        value(3),
+    );
+}
+
+#[test]
+fn xmirr_tool_annualises_over_the_dated_span() {
+    let calls = concat!(
+        r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"xmirr","arguments":{"finance":0.10,"reinvest":0.12,"flows":[{"date":"2020-01-01","amount":-1000},{"date":"2020-07-01","amount":-500},{"date":"2021-04-01","amount":800},{"date":"2022-01-01","amount":900}]}}}"#,
+        "\n",
+    );
+
+    Command::cargo_bin("time-value-mcp")
+        .unwrap()
+        .write_stdin(session(calls))
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("0.0950481"));
+}
+
+#[test]
+fn the_dated_tools_are_advertised_and_follow_the_currency_split() {
+    // `xnfv` produces money, so it echoes the currency; `xmirr` produces a rate, so
+    // it does not (ADR-0057). Both are listed alongside the originals.
+    let calls = concat!(
+        r#"{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}"#,
+        "\n",
+        r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"xnfv","arguments":{"rate":0.10,"currency":"USD","flows":[{"date":"2020-01-01","amount":-100},{"date":"2021-01-01","amount":110}]}}}"#,
+        "\n",
+        r#"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"xmirr","arguments":{"finance":0.10,"reinvest":0.12,"currency":"USD","flows":[{"date":"2020-01-01","amount":-1000},{"date":"2022-01-01","amount":1500}]}}}"#,
+        "\n",
+    );
+
+    Command::cargo_bin("time-value-mcp")
+        .unwrap()
+        .write_stdin(session(calls))
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"xnfv\""))
+        .stdout(predicate::str::contains("\"xmirr\""));
+
+    // …and in the structured results, only the monetary one carries the code.
+    let results = structured(calls);
+    assert_eq!(results[&3]["currency"], serde_json::json!("USD"));
+    assert!(
+        results[&4].get("currency").is_none(),
+        "the dated MIRR echoed a currency: {}",
+        results[&4],
+    );
+}
+
+#[test]
+fn xmirr_reports_a_series_dated_on_one_day() {
+    // Zero span: with the flows matching, every rate satisfies them; with them
+    // mismatched, none does (ADR-0056, ADR-0065).
+    let calls = concat!(
+        r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"xmirr","arguments":{"finance":0.10,"reinvest":0.10,"flows":[{"date":"2020-01-01","amount":-1000},{"date":"2020-01-01","amount":1000}]}}}"#,
+        "\n",
+        r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"xmirr","arguments":{"finance":0.10,"reinvest":0.10,"flows":[{"date":"2020-01-01","amount":-1000},{"date":"2020-01-01","amount":1500}]}}}"#,
+        "\n",
+        r#"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"xmirr","arguments":{"finance":0.10,"reinvest":0.10,"flows":[{"date":"2020-01-01","amount":1000}]}}}"#,
+        "\n",
+    );
+
+    Command::cargo_bin("time-value-mcp")
+        .unwrap()
+        .write_stdin(session(calls))
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "every rate satisfies these inputs",
+        ))
+        .stdout(predicate::str::contains("no real solution"))
+        .stdout(predicate::str::contains("no outflows"));
+}
+
 #[test]
 fn an_invalid_date_is_an_error() {
     let calls = concat!(

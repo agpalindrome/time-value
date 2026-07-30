@@ -1,6 +1,8 @@
 # ADR-0060: `OwnedCashflows` on the wire — a bare array of `Money`, no periodicity
 
-- **Status:** Accepted
+- **Status:** Accepted (amended by [0065](0065-dated-counterparts.md) — a second
+  sequence wire type, `OwnedDatedCashflows`, on the same terms; order is meaningful
+  there and there is no periodicity to omit)
 - **Date:** 2026-07-30
 - **Deciders:** Project owner
 - **Follows:** [ADR-0042](0042-serde-support.md) (the validating `serde` wire

@@ -94,6 +94,220 @@ fn xirr_of_the_excel_reference() {
         .stdout(predicate::str::starts_with("0.373"));
 }
 
+// ---- The dated counterparts: `series xnfv` / `series xmirr` (ADR-0065) ----
+
+#[test]
+fn xnfv_of_dated_flows() {
+    // -100 on 2020-01-01, +110 on 2021-01-01, compounded at 10%/yr to the later
+    // date. 2020 is a leap year, so the span is 366/365 and the outflow grows to a
+    // shade over 110: the value at the horizon is −0.0287…
+    time_value()
+        .args([
+            "series",
+            "xnfv",
+            "--rate",
+            "0.10",
+            "2020-01-01:-100",
+            "2021-01-01:110",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::starts_with("-0.028"));
+}
+
+#[test]
+fn xnfv_compounds_to_the_latest_date_whatever_the_order() {
+    // The horizon is the latest date, not the last argument (ADR-0065), so the same
+    // flows given newest-first must print the same amount.
+    let sorted = time_value()
+        .args([
+            "series",
+            "xnfv",
+            "--rate",
+            "0.10",
+            "2020-01-01:-1000",
+            "2020-07-01:-500",
+            "2021-04-01:800",
+            "2022-01-01:900",
+        ])
+        .assert()
+        .success();
+    let reversed = time_value()
+        .args([
+            "series",
+            "xnfv",
+            "--rate",
+            "0.10",
+            "2022-01-01:900",
+            "2021-04-01:800",
+            "2020-07-01:-500",
+            "2020-01-01:-1000",
+        ])
+        .assert()
+        .success();
+    assert_eq!(
+        String::from_utf8_lossy(&sorted.get_output().stdout),
+        String::from_utf8_lossy(&reversed.get_output().stdout),
+    );
+    // …and it is the value computed independently at 60 digits: −27.8267360312988…
+    sorted.stdout(predicate::str::starts_with("-27.8267360"));
+}
+
+#[test]
+fn xmirr_of_dated_flows() {
+    // The same four flows at a 10% finance rate and 12% reinvestment rate, over the
+    // 731/365-year span between the earliest and latest date: 0.09504815957…
+    time_value()
+        .args([
+            "series",
+            "xmirr",
+            "--finance",
+            "0.10",
+            "--reinvest",
+            "0.12",
+            "2020-01-01:-1000",
+            "2020-07-01:-500",
+            "2021-04-01:800",
+            "2022-01-01:900",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::starts_with("0.0950481"));
+}
+
+#[test]
+fn xmirr_reports_a_series_dated_on_one_day() {
+    // The span is zero, so the growth factor is 1 whatever the rate. With the flows
+    // matching, *every* rate satisfies them; with them mismatched, none does. The
+    // arm interpolates the library's message rather than picking one statically.
+    time_value()
+        .args([
+            "series",
+            "xmirr",
+            "--finance",
+            "0.10",
+            "--reinvest",
+            "0.10",
+            "2020-01-01:-1000",
+            "2020-01-01:1000",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "every rate satisfies these inputs",
+        ));
+
+    time_value()
+        .args([
+            "series",
+            "xmirr",
+            "--finance",
+            "0.10",
+            "--reinvest",
+            "0.10",
+            "2020-01-01:-1000",
+            "2020-01-01:1500",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("no real solution"));
+}
+
+#[test]
+fn xmirr_without_outflows_says_so() {
+    time_value()
+        .args([
+            "series",
+            "xmirr",
+            "--finance",
+            "0.10",
+            "--reinvest",
+            "0.10",
+            "2020-01-01:1000",
+            "2021-01-01:500",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("no outflows"));
+}
+
+#[test]
+fn the_dated_counterparts_follow_the_currency_split() {
+    // `xnfv` produces a `Money`, so it echoes the currency; `xmirr` produces a rate,
+    // so it never does (ADR-0057).
+    time_value()
+        .args([
+            "--currency",
+            "USD",
+            "series",
+            "xnfv",
+            "--rate",
+            "0.10",
+            "2020-01-01:-100",
+            "2021-01-01:110",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("USD"));
+
+    time_value()
+        .args([
+            "--currency",
+            "USD",
+            "series",
+            "xmirr",
+            "--finance",
+            "0.10",
+            "--reinvest",
+            "0.12",
+            "2020-01-01:-1000",
+            "2022-01-01:1500",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("USD").not());
+}
+
+#[test]
+fn the_dated_counterparts_emit_the_uniform_json_shape() {
+    time_value()
+        .args([
+            "--json",
+            "--currency",
+            "EUR",
+            "series",
+            "xnfv",
+            "--rate",
+            "0.10",
+            "2020-01-01:-100",
+            "2021-01-01:110",
+        ])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("\"value\"")
+                .and(predicate::str::contains("\"currency\":\"EUR\"")),
+        );
+
+    time_value()
+        .args([
+            "--json",
+            "series",
+            "xmirr",
+            "--finance",
+            "0.10",
+            "--reinvest",
+            "0.12",
+            "2020-01-01:-1000",
+            "2022-01-01:1500",
+        ])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("\"value\"").and(predicate::str::contains("currency").not()),
+        );
+}
+
 #[test]
 fn an_invalid_date_fails() {
     time_value()
