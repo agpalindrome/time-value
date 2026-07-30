@@ -34,8 +34,13 @@ jobs:
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@v21
 
-      - name: Nix store cache
-        uses: DeterminateSystems/magic-nix-cache-action@v13
+      # No Nix store cache here either (ADR-0066). A tag ref is a one-off, so
+      # anything saved goes to a scope no later run can read — the save is waste by
+      # construction, not merely a poor trade as it was in `ci.yml`. Restoring would
+      # help, but this action cannot restore without also saving, and once `ci.yml`
+      # stopped refreshing the `main` scope there is nothing left to restore from
+      # anyway. The cost that matters is not the ~88s: it is ~1.4 GB of the shared
+      # 10 GB budget, which would evict the cargo cache CI depends on.
 
       # Exchange the GitHub OIDC token for a short-lived crates.io token.
       - name: Authenticate to crates.io
