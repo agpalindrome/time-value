@@ -23,10 +23,10 @@ use time_value_daycount::{act365_year_fraction, iso_to_day};
 use crate::params::{
     AmortizeInput, AnnuityPaymentInput, AnnuityPeriodsInput, AnnuityRateInput, AnnuityValueInput,
     ContinuousRateInput, ContinuousValueInput, ConvertInput, DatedFlow, DatedIrrInput,
-    DatedSeriesInput, FutureValueInput, GrowingAnnuityInput, GrowingPerpetuityInput, IrrInput,
-    MirrInput, Periodicity, PerpetuityInput, PresentValueInput, RateConvertInput,
-    RateEffectiveAnnualInput, RateFromNominalInput, SeriesInput, SingleSumPeriodsInput,
-    SingleSumRateInput,
+    DatedSeriesInput, FutureValueInput, GrowingAnnuityInput, GrowingPaymentInput,
+    GrowingPeriodsInput, GrowingPerpetuityInput, GrowingRateInput, IrrInput, MirrInput,
+    Periodicity, PerpetuityInput, PresentValueInput, RateConvertInput, RateEffectiveAnnualInput,
+    RateFromNominalInput, SeriesInput, SingleSumPeriodsInput, SingleSumRateInput,
 };
 use crate::results::{MoneyResult, ScalarResult, ScheduleResult};
 
@@ -81,10 +81,15 @@ future value is the sinking-fund payment), `annuity_perpetuity`, \
 `annuity_growing_present_value` / `annuity_growing_future_value` (a payment that \
 grows each period; unlike a perpetuity, the rate need not exceed the growth), and \
 the annuity-due forms `annuity_due_present_value`, `annuity_due_future_value`, \
-`annuity_due_payment`, `annuity_due_perpetuity`. The growing forms carry a \
+`annuity_due_payment`, `annuity_due_periods`, `annuity_due_rate`, \
+`annuity_due_perpetuity` — the due solves take the same present/future anchor the \
+ordinary ones do. The growing forms carry a \
 `growing` prefix throughout: `annuity_growing_present_value`, \
 `annuity_growing_future_value`, `annuity_growing_due_present_value`, \
-`annuity_growing_due_future_value`, `annuity_growing_due_perpetuity`. \
+`annuity_growing_due_future_value`, `annuity_growing_due_perpetuity`, and the \
+inverses `annuity_growing_payment` / `annuity_growing_periods` / \
+`annuity_growing_rate`, which are present-anchored only (a growing annuity's \
+future value has no closed-form inverse in the term). \
 Rate conversions: `rate_effective_annual` (EAR), `rate_convert` (between \
 periodicities), `rate_from_nominal` and `rate_nominal` (nominal/APR) — each takes \
 a periodicity (daily, weekly, monthly, quarterly, semi-annual, annual). \
@@ -347,16 +352,7 @@ impl TimeValueServer {
         &self,
         Parameters(input): Parameters<AnnuityPeriodsInput>,
     ) -> Result<Json<ScalarResult>, ErrorData> {
-        let currency = resolve_currency(input.currency);
-        let r = rate(input.rate)?;
-        let pmt = Payment(money(input.payment, currency)?);
-        let periods = match anchor(input.present, input.future)? {
-            Anchor::Present(p) => annuity::periods(r, pmt, PresentValue(money(p, currency)?)),
-            Anchor::Future(f) => {
-                annuity::periods_from_future(r, pmt, FutureValue(money(f, currency)?))
-            }
-        }
-        .map_err(tvm)?;
+        let periods = solved_periods(&input, (annuity::periods, annuity::periods_from_future))?;
         Ok(Json(ScalarResult::new(periods.value())))
     }
 
@@ -368,18 +364,13 @@ impl TimeValueServer {
         &self,
         Parameters(input): Parameters<AnnuityRateInput>,
     ) -> Result<Json<ScalarResult>, ErrorData> {
-        let currency = resolve_currency(input.currency);
-        let n = period(input.periods)?;
-        let pmt = Payment(money(input.payment, currency)?);
-        let solved = match anchor(input.present, input.future)? {
-            Anchor::Present(p) => {
-                annuity::rate::<Monthly>(n, pmt, PresentValue(money(p, currency)?))
-            }
-            Anchor::Future(f) => {
-                annuity::rate_from_future::<Monthly>(n, pmt, FutureValue(money(f, currency)?))
-            }
-        }
-        .map_err(tvm)?;
+        let solved = solved_rate(
+            &input,
+            (
+                annuity::rate::<Monthly>,
+                annuity::rate_from_future::<Monthly>,
+            ),
+        )?;
         Ok(Json(ScalarResult::new(solved.value())))
     }
 
@@ -504,6 +495,96 @@ impl TimeValueServer {
             (annuity::due::payment, annuity::due::payment_from_future),
         )?;
         Ok(Json(payment.into()))
+    }
+
+    #[tool(
+        name = "annuity_due_periods",
+        description = "Solve for the number of level START-of-period payments, from a present value or a future value (provide exactly one)."
+    )]
+    fn annuity_due_periods(
+        &self,
+        Parameters(input): Parameters<AnnuityPeriodsInput>,
+    ) -> Result<Json<ScalarResult>, ErrorData> {
+        let periods = solved_periods(
+            &input,
+            (annuity::due::periods, annuity::due::periods_from_future),
+        )?;
+        Ok(Json(ScalarResult::new(periods.value())))
+    }
+
+    #[tool(
+        name = "annuity_due_rate",
+        description = "Solve for the per-period rate of an annuity-due (START-of-period payments), from a present value or a future value (provide exactly one). From a present value the term must exceed one period: a single start-of-period payment is not discounted at all, so every rate satisfies it and none is the answer."
+    )]
+    fn annuity_due_rate(
+        &self,
+        Parameters(input): Parameters<AnnuityRateInput>,
+    ) -> Result<Json<ScalarResult>, ErrorData> {
+        let solved = solved_rate(
+            &input,
+            (
+                annuity::due::rate::<Monthly>,
+                annuity::due::rate_from_future::<Monthly>,
+            ),
+        )?;
+        Ok(Json(ScalarResult::new(solved.value())))
+    }
+
+    #[tool(
+        name = "annuity_growing_payment",
+        description = "Solve for the FIRST payment of a growing annuity that amortises a present value, each later payment being (1 + growth) times the one before. There is no future-value form: a growing annuity's future value has no closed-form inverse."
+    )]
+    fn annuity_growing_payment(
+        &self,
+        Parameters(input): Parameters<GrowingPaymentInput>,
+    ) -> Result<Json<MoneyResult>, ErrorData> {
+        let currency = resolve_currency(input.currency);
+        let money = annuity::growing_payment(
+            rate(input.rate)?,
+            Growth(rate(input.growth)?),
+            period(input.periods)?,
+            money(input.present, currency)?,
+        )
+        .map_err(tvm)?;
+        Ok(Json(money.into()))
+    }
+
+    #[tool(
+        name = "annuity_growing_periods",
+        description = "Solve for the number of growing payments that amortise a present value. When the rate exceeds the growth the present value is capped by the growing perpetuity (payment / (rate - growth)); a target at or above that cap is reached by no finite number of payments."
+    )]
+    fn annuity_growing_periods(
+        &self,
+        Parameters(input): Parameters<GrowingPeriodsInput>,
+    ) -> Result<Json<ScalarResult>, ErrorData> {
+        let currency = resolve_currency(input.currency);
+        let periods = annuity::growing_periods(
+            rate(input.rate)?,
+            Growth(rate(input.growth)?),
+            Payment(money(input.payment, currency)?),
+            PresentValue(money(input.present, currency)?),
+        )
+        .map_err(tvm)?;
+        Ok(Json(ScalarResult::new(periods.value())))
+    }
+
+    #[tool(
+        name = "annuity_growing_rate",
+        description = "Solve for the per-period rate at which a growing payment stream amortises a present value. Only the growth rate is supplied; the discount rate is what is solved for."
+    )]
+    fn annuity_growing_rate(
+        &self,
+        Parameters(input): Parameters<GrowingRateInput>,
+    ) -> Result<Json<ScalarResult>, ErrorData> {
+        let currency = resolve_currency(input.currency);
+        let solved = annuity::growing_rate(
+            Growth(rate(input.growth)?),
+            period(input.periods)?,
+            Payment(money(input.payment, currency)?),
+            PresentValue(money(input.present, currency)?),
+        )
+        .map_err(tvm)?;
+        Ok(Json(ScalarResult::new(solved.value())))
     }
 
     #[tool(
@@ -838,6 +919,52 @@ fn level_payment(
     match anchor(input.present, input.future)? {
         Anchor::Present(p) => from_present(rate, periods, money(p, currency)?),
         Anchor::Future(f) => from_future(rate, periods, money(f, currency)?),
+    }
+    .map_err(tvm)
+}
+
+type PeriodsFromPresent =
+    fn(Rate<Monthly>, Payment, PresentValue) -> Result<Period<Monthly>, TvmError>;
+type PeriodsFromFuture =
+    fn(Rate<Monthly>, Payment, FutureValue) -> Result<Period<Monthly>, TvmError>;
+type RateFromPresent =
+    fn(Period<Monthly>, Payment, PresentValue) -> Result<Rate<Monthly>, TvmError>;
+type RateFromFuture = fn(Period<Monthly>, Payment, FutureValue) -> Result<Rate<Monthly>, TvmError>;
+
+/// Solve for the number of payments from whichever value the caller anchored to,
+/// shared by `annuity_periods` and `annuity_due_periods` (ADR-0063).
+///
+/// The two core functions differ in the *role* their amount carries
+/// ([`PresentValue`] against [`FutureValue`]), so unlike [`level_payment`]'s pair they
+/// cannot share a single `fn` type; taking them as a pair of function pointers serves
+/// the same purpose, and keeps the ordinary and the due tool from drifting apart.
+fn solved_periods(
+    input: &AnnuityPeriodsInput,
+    (from_present, from_future): (PeriodsFromPresent, PeriodsFromFuture),
+) -> Result<Period<Monthly>, ErrorData> {
+    let currency = resolve_currency(input.currency);
+    let (rate, payment) = (rate(input.rate)?, Payment(money(input.payment, currency)?));
+    match anchor(input.present, input.future)? {
+        Anchor::Present(p) => from_present(rate, payment, PresentValue(money(p, currency)?)),
+        Anchor::Future(f) => from_future(rate, payment, FutureValue(money(f, currency)?)),
+    }
+    .map_err(tvm)
+}
+
+/// Solve for the per-period rate from whichever value the caller anchored to, shared
+/// by `annuity_rate` and `annuity_due_rate` (ADR-0063).
+fn solved_rate(
+    input: &AnnuityRateInput,
+    (from_present, from_future): (RateFromPresent, RateFromFuture),
+) -> Result<Rate<Monthly>, ErrorData> {
+    let currency = resolve_currency(input.currency);
+    let (periods, payment) = (
+        period(input.periods)?,
+        Payment(money(input.payment, currency)?),
+    );
+    match anchor(input.present, input.future)? {
+        Anchor::Present(p) => from_present(periods, payment, PresentValue(money(p, currency)?)),
+        Anchor::Future(f) => from_future(periods, payment, FutureValue(money(f, currency)?)),
     }
     .map_err(tvm)
 }

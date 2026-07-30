@@ -47,12 +47,19 @@ time-value annuity rate    --periods 12 --payment 100 --present 1125.51  # or --
 time-value annuity perpetuity         --rate 0.05 --payment 100          # 2000
 time-value annuity growing-perpetuity --rate 0.05 --growth 0.02 --payment 100
 time-value annuity due pv  --rate 0.01 --periods 12 --payment 100
+time-value annuity due nper --rate 0.01 --payment 100 --present 1136.76   # or --future
+time-value annuity due rate --periods 12 --payment 100 --present 1136.76  # or --future
 time-value annuity due perpetuity --rate 0.05 --payment 100              # 2100 (× 1 + r)
 # Growing annuities (the rate need not exceed the growth); due-pv / due-fv / due-perpetuity
 # are the start-of-period forms
 time-value annuity growing pv --rate 0.05 --growth 0.02 --periods 12 --payment 100
 time-value annuity growing fv --rate 0.05 --growth 0.02 --periods 12 --payment 100
 time-value annuity growing due-perpetuity --rate 0.05 --growth 0.02 --payment 100  # 3500
+# The growing inverses are present-anchored only: solving a growing *future* value
+# for the term has no closed form
+time-value annuity growing payment --rate 0.05 --growth 0.02 --periods 12 --present 979.32  # 100
+time-value annuity growing nper    --rate 0.05 --growth 0.02 --payment 100 --present 979.32 # 12
+time-value annuity growing rate    --growth 0.02 --periods 12 --payment 100 --present 979.32 # 0.05
 
 # Rate conversions (the one family that takes a periodicity)
 time-value rate ear         --rate 0.01 --periodicity monthly            # 0.126825…

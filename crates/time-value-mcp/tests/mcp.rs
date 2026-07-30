@@ -239,6 +239,108 @@ fn the_perpetuity_due_tools_reject_divergence() {
         .stdout(predicate::str::contains("diverges"));
 }
 
+/// The annuity-due period and rate solves, from both anchors (ADR-0063). Every value
+/// here comes from twelve start-of-month payments of 100 at 1%/month, so both anchors
+/// return the term or the rate that produced it.
+#[test]
+fn annuity_due_solve_tools() {
+    let calls = concat!(
+        r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"annuity_due_periods","arguments":{"rate":0.01,"payment":100,"present":1136.763}}}"#,
+        "\n",
+        r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"annuity_due_periods","arguments":{"rate":0.01,"payment":100,"future":1280.933}}}"#,
+        "\n",
+        r#"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"annuity_due_rate","arguments":{"periods":12,"payment":100,"present":1136.763}}}"#,
+        "\n",
+        r#"{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"annuity_due_rate","arguments":{"periods":12,"payment":100,"future":1280.933}}}"#,
+        "\n",
+    );
+
+    Command::cargo_bin("time-value-mcp")
+        .unwrap()
+        .write_stdin(session(calls))
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("12.0"))
+        .stdout(predicate::str::contains("0.00999").or(predicate::str::contains("0.01")));
+}
+
+/// A single start-of-period *payment* is never discounted, so the due present-value
+/// factor is `1` at every rate and the rate solve is under-determined — the row
+/// ADR-0056's table has for the *ordinary future* factor, moved here by the `(1 + r)`
+/// scaling. A single start-of-period *contribution* is the mirror image: its factor is
+/// `1 + r`, so it is a determined solve where the ordinary one is not (ADR-0063).
+#[test]
+fn a_single_period_annuity_due_rate_solve_reports_which_side_it_is_on() {
+    let calls = concat!(
+        r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"annuity_due_rate","arguments":{"periods":1,"payment":100,"present":100}}}"#,
+        "\n",
+        r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"annuity_due_rate","arguments":{"periods":1,"payment":100,"present":150}}}"#,
+        "\n",
+        r#"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"annuity_due_rate","arguments":{"periods":1,"payment":100,"future":125}}}"#,
+        "\n",
+    );
+
+    Command::cargo_bin("time-value-mcp")
+        .unwrap()
+        .write_stdin(session(calls))
+        .assert()
+        .success()
+        // Satisfied by every rate, so none is the answer…
+        .stdout(predicate::str::contains("every rate satisfies"))
+        // …satisfied by none, which is a different failure…
+        .stdout(predicate::str::contains("no real solution"))
+        // …and the future anchor solves it outright: 125/100 − 1.
+        .stdout(predicate::str::contains("0.2499").or(predicate::str::contains("0.25")));
+}
+
+/// The three growing-annuity inverses (ADR-0063), each recovering the argument that
+/// produced a growing present value of 979.318 (twelve payments from 100 escalating
+/// 2%/month, discounted at 5%/month).
+#[test]
+fn annuity_growing_inverse_tools() {
+    let calls = concat!(
+        r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"annuity_growing_payment","arguments":{"rate":0.05,"growth":0.02,"periods":12,"present":979.318,"currency":"USD"}}}"#,
+        "\n",
+        r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"annuity_growing_periods","arguments":{"rate":0.05,"growth":0.02,"payment":100,"present":979.318}}}"#,
+        "\n",
+        r#"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"annuity_growing_rate","arguments":{"growth":0.02,"periods":12,"payment":100,"present":979.318}}}"#,
+        "\n",
+    );
+
+    Command::cargo_bin("time-value-mcp")
+        .unwrap()
+        .write_stdin(session(calls))
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("99.99").or(predicate::str::contains("100.0")))
+        .stdout(predicate::str::contains("\"USD\""))
+        .stdout(predicate::str::contains("11.99").or(predicate::str::contains("12.0")))
+        .stdout(predicate::str::contains("0.05"));
+}
+
+/// With the rate above the growth a growing annuity's present value is capped by the
+/// growing perpetuity, so a target at or above `payment / (rate − growth)` is reached
+/// by no finite term — while growth above the rate has no cap at all (ADR-0063).
+#[test]
+fn annuity_growing_periods_respects_the_perpetuity_ceiling() {
+    let calls = concat!(
+        // 100/(0.05 − 0.02) = 3333.33, so 4000 is unreachable.
+        r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"annuity_growing_periods","arguments":{"rate":0.05,"growth":0.02,"payment":100,"present":4000}}}"#,
+        "\n",
+        // The same target with the growth above the rate: no ceiling, so it solves.
+        r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"annuity_growing_periods","arguments":{"rate":0.02,"growth":0.05,"payment":100,"present":4000}}}"#,
+        "\n",
+    );
+
+    Command::cargo_bin("time-value-mcp")
+        .unwrap()
+        .write_stdin(session(calls))
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("never amortised"))
+        .stdout(predicate::str::contains("\"value\":2"));
+}
+
 #[test]
 fn annuity_periods_requires_exactly_one_anchor() {
     let calls = concat!(

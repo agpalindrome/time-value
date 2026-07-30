@@ -19,6 +19,14 @@
   [ADR-0045](0045-make-illegal-states-unrepresentable.md) (test the class, not the
   instance)
 
+> **Extended (2026-07-30) by [ADR-0063](0063-annuity-due-solves-and-growing-inverses.md).**
+> The first two entries of the *Out of scope* list below are discharged there:
+> `annuity::due` now has its `periods` and `rate` solves (from either anchor), and the
+> growing annuity has its present-anchored inverses. The note about `run_annuity` being
+> "the last flat arm that fits" is discharged too — ADR-0063 extracted the repeated
+> shapes, leaving that dispatcher shorter than it is here. #106's other three groups
+> (`continuous`, `DatedCashflows`, `Currency::from_numeric`) remain open.
+
 ## Context
 
 Issue #106 enumerated the public surface module by module and found several

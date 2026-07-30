@@ -237,9 +237,16 @@ fn single_sum_output_conforms_to_declared_schema() {
     ]);
 }
 
-/// The annuity family: ordinary, the PMT/NPER/RATE solves from either anchor,
-/// perpetuities (ordinary and due), the annuity-due forms, and the finite growing
-/// forms (ADR-0048, ADR-0062).
+/// The **level** annuity tools: ordinary and annuity-due values, the PMT/NPER/RATE
+/// solves from either anchor, and the two level perpetuities (ADR-0062, ADR-0063).
+///
+/// Each anchored tool appears **twice**, once per anchor, because the anchor selects a
+/// different core call and so a different code path to the same declared schema.
+///
+/// The growing tools have their own test below rather than extending this list — one
+/// case list covering all twenty-six annuity tools ran past the workspace's
+/// function-length lint, and splitting on {level, growing} is the same axis
+/// ADR-0049 groups the surface by.
 #[test]
 fn annuity_output_conforms_to_declared_schema() {
     check_conformance(&[
@@ -266,8 +273,16 @@ fn annuity_output_conforms_to_declared_schema() {
             args: json!({"rate":0.01,"payment":100,"present":1000}),
         },
         Case {
+            tool: "annuity_periods",
+            args: json!({"rate":0.01,"payment":100,"future":1268.250}),
+        },
+        Case {
             tool: "annuity_rate",
             args: json!({"periods":12,"payment":100,"present":1000}),
+        },
+        Case {
+            tool: "annuity_rate",
+            args: json!({"periods":12,"payment":100,"future":1268.250}),
         },
         Case {
             tool: "annuity_perpetuity",
@@ -294,9 +309,35 @@ fn annuity_output_conforms_to_declared_schema() {
             args: json!({"rate":0.01,"periods":12,"future":1280.933,"currency":"CHF"}),
         },
         Case {
+            tool: "annuity_due_periods",
+            args: json!({"rate":0.01,"payment":100,"present":1136.763}),
+        },
+        Case {
+            tool: "annuity_due_periods",
+            args: json!({"rate":0.01,"payment":100,"future":1280.933}),
+        },
+        Case {
+            tool: "annuity_due_rate",
+            args: json!({"periods":12,"payment":100,"present":1136.763}),
+        },
+        Case {
+            tool: "annuity_due_rate",
+            args: json!({"periods":12,"payment":100,"future":1280.933}),
+        },
+        Case {
             tool: "annuity_due_perpetuity",
             args: json!({"rate":0.05,"payment":100,"currency":"JPY"}),
         },
+    ]);
+}
+
+/// The **growing** annuity tools: the four finite values (present/future × ordinary/due),
+/// the growing perpetuity-due, and the three present-anchored inverses (ADR-0048,
+/// ADR-0049, ADR-0062, ADR-0063). `annuity_growing_perpetuity` stays with the level
+/// group above, where it has always been.
+#[test]
+fn annuity_growing_output_conforms_to_declared_schema() {
+    check_conformance(&[
         Case {
             tool: "annuity_growing_present_value",
             args: json!({"rate":0.05,"growth":0.02,"periods":12,"payment":100,"currency":"EUR"}),
@@ -316,6 +357,18 @@ fn annuity_output_conforms_to_declared_schema() {
         Case {
             tool: "annuity_growing_due_perpetuity",
             args: json!({"rate":0.05,"growth":0.02,"payment":100}),
+        },
+        Case {
+            tool: "annuity_growing_payment",
+            args: json!({"rate":0.05,"growth":0.02,"periods":12,"present":979.318,"currency":"USD"}),
+        },
+        Case {
+            tool: "annuity_growing_periods",
+            args: json!({"rate":0.05,"growth":0.02,"payment":100,"present":979.318}),
+        },
+        Case {
+            tool: "annuity_growing_rate",
+            args: json!({"growth":0.02,"periods":12,"payment":100,"present":979.318}),
         },
     ]);
 }

@@ -600,6 +600,308 @@ fn the_perpetuity_due_forms_reject_divergence() {
         .stderr(predicate::str::contains("diverges"));
 }
 
+// ---- The annuity-due solves (ADR-0063) ----
+
+#[test]
+fn annuity_due_nper_solves_from_either_basis() {
+    // The due present value 1136.763 and future value 1280.933 both come from 12
+    // start-of-month payments of 100 at 1%/month, so both anchors return the term.
+    for (basis, value) in [("--present", "1136.763"), ("--future", "1280.933")] {
+        time_value()
+            .args([
+                "annuity",
+                "due",
+                "nper",
+                "--rate",
+                "0.01",
+                "--payment",
+                "100",
+                basis,
+                value,
+            ])
+            .assert()
+            .success()
+            .stdout(predicate::str::starts_with("12.0"));
+    }
+}
+
+#[test]
+fn annuity_due_rate_solves_from_either_basis() {
+    for (basis, value) in [("--present", "1136.763"), ("--future", "1280.933")] {
+        time_value()
+            .args([
+                "annuity",
+                "due",
+                "rate",
+                "--periods",
+                "12",
+                "--payment",
+                "100",
+                basis,
+                value,
+            ])
+            .assert()
+            .success()
+            .stdout(predicate::str::starts_with("0.00999").or(predicate::str::starts_with("0.01")));
+    }
+}
+
+#[test]
+fn annuity_due_solves_take_the_same_anchor_as_the_ordinary_ones() {
+    for command in ["nper", "rate"] {
+        let first = if command == "nper" {
+            "--rate"
+        } else {
+            "--periods"
+        };
+        let first_value = if command == "nper" { "0.01" } else { "12" };
+        time_value()
+            .args([
+                "annuity",
+                "due",
+                command,
+                first,
+                first_value,
+                "--payment",
+                "100",
+            ])
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("--present").or(predicate::str::contains("--future")));
+        time_value()
+            .args([
+                "annuity",
+                "due",
+                command,
+                first,
+                first_value,
+                "--payment",
+                "100",
+                "--present",
+                "1136.763",
+                "--future",
+                "1280.933",
+            ])
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("mutually exclusive"));
+    }
+}
+
+#[test]
+fn annuity_due_rate_over_one_period_is_indeterminate_from_a_present_value() {
+    // A single start-of-period payment is not discounted, so the due present-value
+    // factor is 1 at every rate: every rate satisfies the equation and none is *the*
+    // answer. The message interpolates the library error rather than claiming no rate
+    // solves the inputs, which would be the opposite of the truth (ADR-0056/0063).
+    time_value()
+        .args([
+            "annuity",
+            "due",
+            "rate",
+            "--periods",
+            "1",
+            "--payment",
+            "100",
+            "--present",
+            "100",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("every rate satisfies"));
+
+    // A single start-of-period *contribution*, by contrast, is a determined solve:
+    // its factor is `1 + r`, so 100 growing to 125 in a period is 25%.
+    time_value()
+        .args([
+            "annuity",
+            "due",
+            "rate",
+            "--periods",
+            "1",
+            "--payment",
+            "100",
+            "--future",
+            "125",
+        ])
+        .assert()
+        .success()
+        // The solver's root tolerance over the factor's derivative pins this to about
+        // 2.3e-9, so it prints as 0.2499999976 rather than 0.25 exactly.
+        .stdout(predicate::str::starts_with("0.2499").or(predicate::str::starts_with("0.25")));
+}
+
+#[test]
+fn annuity_due_rate_over_zero_periods_is_rejected_from_either_basis() {
+    for basis in ["--present", "--future"] {
+        time_value()
+            .args([
+                "annuity",
+                "due",
+                "rate",
+                "--periods",
+                "0",
+                "--payment",
+                "100",
+                basis,
+                "1000",
+            ])
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("at least one period"));
+    }
+}
+
+// ---- The growing-annuity inverses (ADR-0063) ----
+
+#[test]
+fn annuity_growing_payment_amortises_a_present_value() {
+    // The growing PV of 12 payments from 100 escalating 2%/month at 5%/month is
+    // 979.318, so amortising 979.318 returns the 100 it came from.
+    time_value()
+        .args([
+            "annuity",
+            "growing",
+            "payment",
+            "--rate",
+            "0.05",
+            "--growth",
+            "0.02",
+            "--periods",
+            "12",
+            "--present",
+            "979.318",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::starts_with("99.99").or(predicate::str::starts_with("100")));
+}
+
+#[test]
+fn annuity_growing_nper_and_rate_invert_the_growing_present_value() {
+    time_value()
+        .args([
+            "annuity",
+            "growing",
+            "nper",
+            "--rate",
+            "0.05",
+            "--growth",
+            "0.02",
+            "--payment",
+            "100",
+            "--present",
+            "979.318",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::starts_with("11.99").or(predicate::str::starts_with("12")));
+
+    time_value()
+        .args([
+            "annuity",
+            "growing",
+            "rate",
+            "--growth",
+            "0.02",
+            "--periods",
+            "12",
+            "--payment",
+            "100",
+            "--present",
+            "979.318",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::starts_with("0.05"));
+}
+
+#[test]
+fn annuity_growing_nper_rejects_a_target_above_the_perpetuity_ceiling() {
+    // With the rate above the growth the present value is capped at
+    // 100/(0.05 − 0.02) = 3333.33, so 4000 is reached by no finite term.
+    time_value()
+        .args([
+            "annuity",
+            "growing",
+            "nper",
+            "--rate",
+            "0.05",
+            "--growth",
+            "0.02",
+            "--payment",
+            "100",
+            "--present",
+            "4000",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("number of periods"));
+
+    // Growth *above* the rate has no ceiling, so an arbitrarily large target solves.
+    time_value()
+        .args([
+            "annuity",
+            "growing",
+            "nper",
+            "--rate",
+            "0.02",
+            "--growth",
+            "0.05",
+            "--payment",
+            "100",
+            "--present",
+            "4000",
+        ])
+        .assert()
+        .success();
+}
+
+#[test]
+fn annuity_growing_payment_over_zero_periods_is_rejected() {
+    time_value()
+        .args([
+            "annuity",
+            "growing",
+            "payment",
+            "--rate",
+            "0.05",
+            "--growth",
+            "0.02",
+            "--periods",
+            "0",
+            "--present",
+            "979.318",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("growing annuity payment"));
+}
+
+#[test]
+fn annuity_growing_payment_echoes_its_currency_as_json() {
+    time_value()
+        .args([
+            "--json",
+            "--currency",
+            "USD",
+            "annuity",
+            "growing",
+            "payment",
+            "--rate",
+            "0.05",
+            "--growth",
+            "0.02",
+            "--periods",
+            "12",
+            "--present",
+            "979.318",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"currency\":\"USD\""));
+}
+
 #[test]
 fn rate_effective_annual_of_a_monthly_rate() {
     // (1.01)^12 - 1 = 0.126825…
