@@ -176,6 +176,21 @@ bacon.toml                # bacon jobs (default: clippy)
   "Road to 1.0.0" epic are dissolved/closed). If and when it feels like a good spot,
   the owner decides to cut a release; until then, just do the next useful work and
   keep docs + ADRs current with each change.
+- **Checking whether the release guards are still in place? `grep -F`, never plain
+  `grep`.** The hold guards are `if: ${{ false }}`, and a plain
+  `grep -c 'if: ${{ false }}' .github/workflows/release-plz.yml` reports **0** —
+  silently, with exit status 1, looking exactly like "the guards are gone". They are
+  not: `grep -cF` reports 4 (two real guards, two in the explanatory comments). The
+  cause is the `$`, not the braces — in GNU grep's default basic-regex mode `$` acts
+  as an end-of-line anchor even mid-pattern, so nothing can follow it and the pattern
+  is unmatchable. The braces are literal there and `'{{ false }}'` matches fine on its
+  own. `grep -E` fails differently and more honestly: `{` opens an interval in
+  extended regex, so `{{` is a syntax error rather than a wrong answer.
+
+  This matters beyond the guards: `${{ … }}` is GitHub Actions expression syntax, so
+  it is in every workflow file. Any `grep` over `.github/workflows/` that is meant to
+  prove something is present needs `-F` (or `\$`). A check that reads as a safety
+  check and silently returns "absent" is worse than no check.
 - Release *machinery* is wired but **inert**: `release-plz.yml` (per-crate versions,
   changelogs, tags, GitHub releases from Conventional Commits; `release-plz.toml`,
   `publish = false`) and `publish.yml` (`cargo publish` via crates.io OIDC trusted
