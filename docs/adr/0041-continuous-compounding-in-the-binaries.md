@@ -9,6 +9,16 @@
   [ADR-0037](0037-currency-in-the-binaries.md) (currency in the binaries),
   [ADR-0040](0040-fx-convert-in-the-binaries.md) (FX convert in the binaries)
 
+> **Extended (2026-07-30) by [ADR-0064](0064-continuous-solves.md).** The family
+> below covers the four operations that existed when it was written; ADR-0064 adds
+> the two solves — CLI `continuous rate` / `continuous years`, MCP `continuous_rate` /
+> `continuous_years` — under this ADR's own grammar. Two of its decisions decided
+> those names: `--years` rather than `--periods` for a period-free span (so the span
+> solve is `years`, giving a rare exact CLI↔MCP↔core name match), and `--rate` for
+> the force of interest on the grounds that the family name says what kind of rate it
+> is (so the force solve is `rate`, parallel to `single-sum rate`). The solves take
+> **both** amounts, so they use no `--present`/`--future` anchor.
+
 ## Context
 
 Continuous compounding landed in the **core** in ADR-0036: a periodicity-free

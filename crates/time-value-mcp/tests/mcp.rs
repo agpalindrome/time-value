@@ -706,3 +706,74 @@ fn continuous_rejects_a_non_finite_force() {
         .success()
         .stdout(predicate::str::contains("\"error\""));
 }
+
+// ---- The continuous solves (`continuous_rate` / `continuous_years`): ADR-0064
+
+#[test]
+fn the_continuous_solve_tools_read_the_relation_back_and_are_listed() {
+    let calls = concat!(
+        r#"{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}"#,
+        "\n",
+        r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"continuous_rate","arguments":{"years":3,"present":1000,"future":1161.834242728283}}}"#,
+        "\n",
+        r#"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"continuous_years","arguments":{"rate":0.05,"present":1000,"future":1161.834242728283}}}"#,
+        "\n",
+    );
+
+    Command::cargo_bin("time-value-mcp")
+        .unwrap()
+        .write_stdin(session(calls))
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"continuous_rate\""))
+        .stdout(predicate::str::contains("\"continuous_years\""))
+        .stdout(predicate::str::contains("0.0499999999999999"))
+        .stdout(predicate::str::contains("2.9999999999999"));
+}
+
+/// The span is signed (ADR-0036/0064) — a discount answers in the past — and the
+/// scalar result never carries a currency, even when the amounts were denominated
+/// (ADR-0057).
+#[test]
+fn continuous_years_answers_negatively_for_a_discount_and_carries_no_currency() {
+    let calls = concat!(
+        r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"continuous_years","arguments":{"rate":0.05,"present":1161.834242728283,"future":1000,"currency":"USD"}}}"#,
+        "\n",
+    );
+
+    Command::cargo_bin("time-value-mcp")
+        .unwrap()
+        .write_stdin(session(calls))
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("-2.9999999999999"))
+        .stdout(predicate::str::contains("\"currency\"").not());
+}
+
+/// Every degenerate and out-of-domain input surfaces as a tool error carrying the
+/// library's own message — including the two that say *every* value satisfies the
+/// inputs, which name different unknowns.
+#[test]
+fn the_continuous_solves_report_their_degeneracies() {
+    let calls = concat!(
+        r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"continuous_rate","arguments":{"years":0,"present":1000,"future":1000}}}"#,
+        "\n",
+        r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"continuous_years","arguments":{"rate":0,"present":1000,"future":1000}}}"#,
+        "\n",
+        r#"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"continuous_rate","arguments":{"years":3,"present":1000,"future":-500}}}"#,
+        "\n",
+    );
+
+    Command::cargo_bin("time-value-mcp")
+        .unwrap()
+        .write_stdin(session(calls))
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "every rate satisfies these inputs",
+        ))
+        .stdout(predicate::str::contains(
+            "every span satisfies these inputs",
+        ))
+        .stdout(predicate::str::contains("no real solution"));
+}

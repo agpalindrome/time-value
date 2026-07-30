@@ -390,7 +390,11 @@ The growing family's solve matrix is **not** completed, and one part of it canno
   that is still ragged in the other axis buys ordering, not symmetry.
 - **`continuous` still has no solve-for-rate or solve-for-years, `DatedCashflows` no
   net future value / MIRR / owned counterpart, and `Currency` no `from_numeric`** —
-  #106's remaining three groups, each its own decision.
+  #106's remaining three groups, each its own decision. *(The first is discharged by
+  [ADR-0064](0064-continuous-solves.md), which also relocated the
+  `unit_factor_outcome` helper extracted above into `root.rs` and gave it a parameter
+  for the variant to report, so a third call site could share the same rule without
+  claiming the rate was the unknown.)*
 
 ADR-0045's boundary applies as it did in ADR-0062: symmetry alone does not earn a
 place on the surface. Every function added here answers a named question — what

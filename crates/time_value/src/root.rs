@@ -7,6 +7,9 @@
 //! bracketing fallback (`docs/adr/0020-robust-irr-newton-with-bisection-fallback.md`,
 //! `docs/adr/0025-solve-for-periods-and-rate.md`).
 
+#[cfg(any(feature = "std", feature = "libm"))]
+use crate::TvmError;
+
 /// `|x| < tolerance`, without `f64::abs` (which is not in `core`).
 pub(crate) fn within(x: f64, tolerance: f64) -> bool {
     x < tolerance && x > -tolerance
@@ -65,6 +68,39 @@ impl Residual {
         const RELATIVE: f64 = 1e-9;
 
         self.scale.is_finite() && within(self.value, RELATIVE * self.scale)
+    }
+}
+
+/// The error a solve owes its caller when the factor relating its two amounts is
+/// identically `1` over the whole domain of the unknown, so the equation collapses
+/// to `priced = target` with the unknown absent (ADR-0056, ADR-0063, ADR-0064).
+///
+/// Three rows of the crate's constancy tables are of this shape: the annuity
+/// *future*-value factor at `n = 1` (the lone payment falls at the end of the term
+/// and never compounds), the *due present*-value factor at `n = 1` (the lone payment
+/// falls today and is never discounted), and the continuous growth factor
+/// `e^(δ·Y)` whenever its exponent is zero (`Y = 0` in the force solve, `δ = 0` in
+/// the span solve). Either every value of the unknown satisfies the equation or none
+/// does, and which it is turns on that comparison alone — so the caller passes the
+/// variant naming *its* unknown as `indeterminate`, and the "none does" answer is
+/// always [`TvmError::NoRealSolution`].
+///
+/// "Satisfied" is [`Residual::is_root`], the solver's own test, not `==`: a target a
+/// hair from the priced amount still leaves a residual inside the accepted tolerance
+/// at *every* value of the unknown, so an exact-equality guard would let those
+/// near-misses go on leaking the bracketing scan's `−0.9999` sentinel. Sharing this
+/// helper is what keeps the guards and the solver from disagreeing about what counts
+/// as solved.
+#[cfg(any(feature = "std", feature = "libm"))]
+pub(crate) fn unit_factor_outcome(priced: f64, target: f64, indeterminate: TvmError) -> TvmError {
+    let residual = Residual {
+        value: priced - target, // the factor is exactly 1, so this *is* the residual
+        scale: abs(priced) + abs(target),
+    };
+    if residual.is_root() {
+        indeterminate
+    } else {
+        TvmError::NoRealSolution
     }
 }
 

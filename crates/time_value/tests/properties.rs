@@ -1047,6 +1047,164 @@ proptest! {
         prop_assert!(close(back.value(), present.value(), 1e-6 * present.value()));
     }
 
+    /// `continuous::rate` recovers the force of interest that
+    /// `continuous::future_value` was given (ADR-0064). The closed form is
+    /// `ln(FV/PV)/Y`, so there is no iteration to converge and no bracket to find —
+    /// the only question is how much accuracy the logarithm and the division cost.
+    ///
+    /// **Deriving the tolerance.** Writing `u = 1.1e-16` for the unit roundoff and
+    /// `L = δ·Y`: `future_value` returns `PV·e^L` carrying ~1.5u of relative error
+    /// (`exp` plus the multiply), which is ~1.5u of *absolute* error in `L`; the
+    /// `ln1p` form adds ~2u absolute (it is accurate to a couple of ULP on either
+    /// side of `FV = PV` — that is what the two-sided branch buys) plus `u·|L|` of
+    /// its own. Dividing by `Y` gives
+    /// `|Δδ| ≲ (3.5u + u·|L|)/|Y| = 3.5u/|Y| + u·|δ|`. Over `|Y| ≥ 0.25` and
+    /// `|δ| ≤ 0.5` that is `1.6e-15`, and a 300k-sample sweep peaks at `7.6e-16`.
+    /// `1e-13` absolute is that bound with ~60× of margin.
+    ///
+    /// **The tolerance fixes the range, not the other way round:** the bound is
+    /// `3.5u/|Y|`, so admitting spans shorter than `0.25` years raises it in
+    /// proportion — at `|Y| ≥ 1e-3` it is `3.9e-13`, already past what is asserted.
+    /// The span is signed (ADR-0036), so both directions are generated.
+    #[test]
+    fn continuous_rate_recovers_the_force_of_interest(
+        amount in 1.0f64..1e6,
+        force in -0.5f64..0.5,
+        span in 0.25f64..30.0,
+        forward in any::<bool>(),
+    ) {
+        use time_value::{continuous, ContinuousRate, FutureValue, PresentValue};
+
+        let years = if forward { span } else { -span };
+        let rate = ContinuousRate::new(force).unwrap();
+        let present = Money::agnostic(amount).unwrap();
+        let future = continuous::future_value(rate, years, present).unwrap();
+
+        let recovered = continuous::rate(
+            years,
+            PresentValue(present),
+            FutureValue(future),
+        ).unwrap();
+        prop_assert!(close(recovered.value(), force, 1e-13));
+    }
+
+    /// `continuous::years` recovers the span `continuous::future_value` was given
+    /// (ADR-0064) — the same logarithm divided by `δ` instead of by `Y`.
+    ///
+    /// **Deriving the tolerance.** By the derivation on
+    /// `continuous_rate_recovers_the_force_of_interest`, the absolute error in
+    /// `L = ln(FV/PV)` is `≲ 3.5u + u·|L|`; dividing by `δ` gives
+    /// `|ΔY| ≲ 3.5u/|δ| + u·|Y|`. That is dominated by the `1/|δ|` term, so the
+    /// force is bounded away from zero: over `|δ| ≥ 0.01`, `|Y| ≤ 30`, the bound is
+    /// `4.2e-14`, and a 300k-sample sweep peaks at `1.8e-14`. `1e-11` absolute is
+    /// that bound with ~240× of margin.
+    ///
+    /// **That floor on `|δ|` is what the tolerance buys**, and it is the honest
+    /// shape of the operation rather than a generator convenience: as `δ → 0` the
+    /// span stops being recoverable at all, and at `δ = 0` exactly the crate says so
+    /// with `IndeterminateSpan`. Admitting `|δ| ≥ 1e-4` would put the bound at
+    /// `3.9e-12` (still inside), `|δ| ≥ 1e-6` at `3.9e-10` (outside).
+    #[test]
+    fn continuous_years_recovers_the_span(
+        amount in 1.0f64..1e6,
+        magnitude in 0.01f64..0.5,
+        span in 0.25f64..30.0,
+        rising in any::<bool>(),
+        forward in any::<bool>(),
+    ) {
+        use time_value::{continuous, ContinuousRate, FutureValue, PresentValue};
+
+        let years = if forward { span } else { -span };
+        let rate = ContinuousRate::new(if rising { magnitude } else { -magnitude }).unwrap();
+        let present = Money::agnostic(amount).unwrap();
+        let future = continuous::future_value(rate, years, present).unwrap();
+
+        let recovered = continuous::years(
+            rate,
+            PresentValue(present),
+            FutureValue(future),
+        ).unwrap();
+        prop_assert!(close(recovered, years, 1e-11));
+    }
+
+    /// The residual form of both solves, over *arbitrary* same-sign amounts rather
+    /// than a pair one of the crate's own functions produced: whatever
+    /// `rate`/`years` answers, feeding it back through `future_value` must reprice
+    /// the given `future`. This is the property that would catch a sign or
+    /// branch error in `log_ratio` that a round trip could cancel out.
+    ///
+    /// **Deriving the tolerance.** The solved unknown carries `≲ 2u` of absolute
+    /// error in `L` (the two-sided `ln1p`, before any `future_value` rounding is in
+    /// play) plus `u·|L|` of its own, and re-exponentiating turns that back into a
+    /// *relative* error of the same size, with two more roundings from `exp` and the
+    /// multiply: `|ΔFV|/FV ≲ (4 + |L|)·u`. Both amounts are in `[1, 1e6]`, so
+    /// `|L| ≤ ln(1e6) = 13.8` and the bound is `2.0e-15`; a 300k-sample sweep peaks
+    /// at `2.3e-15`. `1e-12` relative is that with ~400× of margin.
+    #[test]
+    fn the_continuous_solves_reprice_the_amount_they_were_given(
+        present_amount in 1.0f64..1e6,
+        future_amount in 1.0f64..1e6,
+        span in 0.25f64..30.0,
+        magnitude in 0.01f64..0.5,
+        forward in any::<bool>(),
+        rising in any::<bool>(),
+    ) {
+        use time_value::{continuous, ContinuousRate, FutureValue, PresentValue};
+
+        let present = Money::agnostic(present_amount).unwrap();
+        let future = Money::agnostic(future_amount).unwrap();
+        let years = if forward { span } else { -span };
+        let force = ContinuousRate::new(if rising { magnitude } else { -magnitude }).unwrap();
+
+        let solved_force = continuous::rate(
+            years,
+            PresentValue(present),
+            FutureValue(future),
+        ).unwrap();
+        let repriced = continuous::future_value(solved_force, years, present).unwrap();
+        prop_assert!(close(repriced.value(), future_amount, 1e-12 * future_amount));
+
+        let solved_span = continuous::years(
+            force,
+            PresentValue(present),
+            FutureValue(future),
+        ).unwrap();
+        let repriced = continuous::future_value(force, solved_span, present).unwrap();
+        prop_assert!(close(repriced.value(), future_amount, 1e-12 * future_amount));
+    }
+
+    /// The domain is a *class*, not the handful of points the unit tests pin: for
+    /// **every** pair of same-sign, non-zero, comparable amounts both solves
+    /// succeed, and for every pair of opposite-sign amounts both fail the same way
+    /// (ADR-0064). The two solves share one guard, so they cannot diverge — this is
+    /// what asserts that.
+    #[test]
+    fn the_continuous_solves_accept_exactly_the_same_domain(
+        left in 1.0f64..1e6,
+        right in 1.0f64..1e6,
+        negate_present in any::<bool>(),
+        negate_future in any::<bool>(),
+    ) {
+        use time_value::{continuous, ContinuousRate, FutureValue, PresentValue, TvmError};
+
+        let pv = if negate_present { -left } else { left };
+        let fv = if negate_future { -right } else { right };
+        let present = PresentValue(Money::agnostic(pv).unwrap());
+        let future = FutureValue(Money::agnostic(fv).unwrap());
+        let force = ContinuousRate::new(0.05).unwrap();
+
+        let solved_force = continuous::rate(3.0, present, future);
+        let solved_span = continuous::years(force, present, future);
+
+        if negate_present == negate_future {
+            prop_assert!(solved_force.is_ok());
+            prop_assert!(solved_span.is_ok());
+        } else {
+            prop_assert_eq!(solved_force, Err(TvmError::NoRealSolution));
+            prop_assert_eq!(solved_span, Err(TvmError::NoRealSolution));
+        }
+    }
+
     /// A term-sized schedule runs for exactly the term requested: the payment
     /// [`annuity::payment`](time_value::annuity::payment) computes retires the
     /// principal on period `n`, neither leaving a stub on `n + 1` nor finishing

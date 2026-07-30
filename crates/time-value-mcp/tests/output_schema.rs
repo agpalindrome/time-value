@@ -412,8 +412,11 @@ fn amortize_output_conforms_to_declared_schema() {
     ]);
 }
 
-/// The continuous family: future/present value (monetary) and the two
-/// effective-annual bridges (scalar rates).
+/// The continuous family: future/present value (monetary), the two solves and the
+/// two effective-annual bridges (all scalar). The solves appear twice each — once
+/// with a positive answer and once with the negative span a discount produces —
+/// because a signed scalar is the shape most likely to slip past a schema that
+/// assumed non-negativity.
 #[test]
 fn continuous_output_conforms_to_declared_schema() {
     check_conformance(&[
@@ -424,6 +427,22 @@ fn continuous_output_conforms_to_declared_schema() {
         Case {
             tool: "continuous_present_value",
             args: json!({"rate":0.05,"years":3,"amount":1000}),
+        },
+        Case {
+            tool: "continuous_rate",
+            args: json!({"years":3,"present":1000,"future":1_161.834_242_728_283,"currency":"USD"}),
+        },
+        Case {
+            tool: "continuous_rate",
+            args: json!({"years":-3,"present":1000,"future":1_161.834_242_728_283}),
+        },
+        Case {
+            tool: "continuous_years",
+            args: json!({"rate":0.05,"present":1000,"future":1_161.834_242_728_283}),
+        },
+        Case {
+            tool: "continuous_years",
+            args: json!({"rate":0.05,"present":1_161.834_242_728_283,"future":1000,"currency":"USD"}),
         },
         Case {
             tool: "continuous_from_effective",

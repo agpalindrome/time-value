@@ -22,11 +22,12 @@ use time_value_daycount::{act365_year_fraction, iso_to_day};
 
 use crate::params::{
     AmortizeInput, AnnuityPaymentInput, AnnuityPeriodsInput, AnnuityRateInput, AnnuityValueInput,
-    ContinuousRateInput, ContinuousValueInput, ConvertInput, DatedFlow, DatedIrrInput,
-    DatedSeriesInput, FutureValueInput, GrowingAnnuityInput, GrowingPaymentInput,
-    GrowingPeriodsInput, GrowingPerpetuityInput, GrowingRateInput, IrrInput, MirrInput,
-    Periodicity, PerpetuityInput, PresentValueInput, RateConvertInput, RateEffectiveAnnualInput,
-    RateFromNominalInput, SeriesInput, SingleSumPeriodsInput, SingleSumRateInput,
+    ContinuousRateInput, ContinuousRateSolveInput, ContinuousValueInput, ContinuousYearsSolveInput,
+    ConvertInput, DatedFlow, DatedIrrInput, DatedSeriesInput, FutureValueInput,
+    GrowingAnnuityInput, GrowingPaymentInput, GrowingPeriodsInput, GrowingPerpetuityInput,
+    GrowingRateInput, IrrInput, MirrInput, Periodicity, PerpetuityInput, PresentValueInput,
+    RateConvertInput, RateEffectiveAnnualInput, RateFromNominalInput, SeriesInput,
+    SingleSumPeriodsInput, SingleSumRateInput,
 };
 use crate::results::{MoneyResult, ScalarResult, ScheduleResult};
 
@@ -95,8 +96,11 @@ periodicities), `rate_from_nominal` and `rate_nominal` (nominal/APR) — each ta
 a periodicity (daily, weekly, monthly, quarterly, semi-annual, annual). \
 Continuous compounding: `continuous_future_value` / `continuous_present_value` \
 grow/discount an amount at a force of interest δ (`rate`) over a real-number \
-`years` span (not a period count), and `continuous_from_effective` / \
-`continuous_effective` bridge δ ↔ an effective annual rate. \
+`years` span (not a period count), the solves `continuous_rate` (the force of \
+interest implied by two amounts and a span) / `continuous_years` (the span implied \
+by two amounts and a force — signed, so a discount answers negatively), and \
+`continuous_from_effective` / `continuous_effective` bridge δ ↔ an effective \
+annual rate. \
 `amortize` returns a schedule (an array of period/payment/interest/principal/\
 balance rows) from a term or a level payment. `convert` restates an amount in \
 another currency at a caller-supplied exchange rate (`amount`, `from`, `to`, \
@@ -814,6 +818,42 @@ impl TimeValueServer {
         )
         .map_err(tvm)?;
         Ok(Json(money.into()))
+    }
+
+    #[tool(
+        name = "continuous_rate",
+        description = "Solve for the force of interest δ at which a present amount grows to a future amount over a span of years: δ = ln(FV/PV)/years. A closed form, not an iterative solve. The two amounts must be non-zero and of the same sign; a negative `years` span simply flips the sign of the answer."
+    )]
+    fn continuous_rate_solve(
+        &self,
+        Parameters(input): Parameters<ContinuousRateSolveInput>,
+    ) -> Result<Json<ScalarResult>, ErrorData> {
+        let currency = resolve_currency(input.currency);
+        let force = continuous::rate(
+            input.years,
+            PresentValue(money(input.present, currency)?),
+            FutureValue(money(input.future, currency)?),
+        )
+        .map_err(tvm)?;
+        Ok(Json(ScalarResult::new(force.value())))
+    }
+
+    #[tool(
+        name = "continuous_years",
+        description = "Solve for the span in years over which a present amount grows to a future amount at a force of interest: years = ln(FV/PV)/δ. A closed form. The answer is a signed continuous span, not a period count: discounting to a smaller amount at a positive force of interest gives a negative span (the amount lies in the past). `rate` must be non-zero and the two amounts non-zero and of the same sign."
+    )]
+    fn continuous_years(
+        &self,
+        Parameters(input): Parameters<ContinuousYearsSolveInput>,
+    ) -> Result<Json<ScalarResult>, ErrorData> {
+        let currency = resolve_currency(input.currency);
+        let span = continuous::years(
+            continuous_rate(input.rate)?,
+            PresentValue(money(input.present, currency)?),
+            FutureValue(money(input.future, currency)?),
+        )
+        .map_err(tvm)?;
+        Ok(Json(ScalarResult::new(span)))
     }
 
     #[tool(

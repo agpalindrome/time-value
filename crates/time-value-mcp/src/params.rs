@@ -415,6 +415,40 @@ pub(crate) struct ContinuousValueInput {
     pub currency: Option<Currency>,
 }
 
+/// Input for the `continuous_rate` tool (solve for the force of interest). Both
+/// amounts are required — unlike the annuity solves there is no present/future
+/// anchor to choose, because the force of interest is read from the pair
+/// (ADR-0064).
+#[derive(Debug, Deserialize, JsonSchema)]
+pub(crate) struct ContinuousRateSolveInput {
+    /// The span in years (a continuous duration; may be fractional or negative).
+    pub years: f64,
+    /// The present amount.
+    pub present: f64,
+    /// The future amount. Must be non-zero and the same sign as `present`.
+    pub future: f64,
+    /// ISO 4217 currency to denominate the amounts in (e.g. `USD`, `JPY`).
+    /// Omit for currency-agnostic (`XXX`) amounts. An unknown code is rejected.
+    #[serde(default)]
+    pub currency: Option<Currency>,
+}
+
+/// Input for the `continuous_years` tool (solve for the span in years).
+#[derive(Debug, Deserialize, JsonSchema)]
+pub(crate) struct ContinuousYearsSolveInput {
+    /// The force of interest δ. Must be non-zero: at zero nothing grows, so every
+    /// span satisfies `future = present` and none is the answer.
+    pub rate: f64,
+    /// The present amount.
+    pub present: f64,
+    /// The future amount. Must be non-zero and the same sign as `present`.
+    pub future: f64,
+    /// ISO 4217 currency to denominate the amounts in (e.g. `USD`, `JPY`).
+    /// Omit for currency-agnostic (`XXX`) amounts. An unknown code is rejected.
+    #[serde(default)]
+    pub currency: Option<Currency>,
+}
+
 /// Input for the `continuous_from_effective` and `continuous_effective` bridge
 /// tools — a single rate, whose meaning depends on the tool (an effective annual
 /// rate in, or a force of interest in). Rate-only, so no currency.

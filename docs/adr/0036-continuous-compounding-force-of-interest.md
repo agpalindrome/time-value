@@ -8,6 +8,15 @@
 - **Follows:** [ADR-0033](0033-core-domain-model-two-axes-and-an-f64-engine.md),
   [ADR-0035](0035-periodicity-tagged-time.md)
 
+> **Amended (2026-07-30) by [ADR-0064](0064-continuous-solves.md).** The `continuous`
+> module below defines only the two *value* operations; ADR-0064 adds the two solves
+> that complete `FV = PV·e^(δ·Y)` — `rate` for the force of interest and `years` for
+> the span — both closed forms. Two decisions here are load-bearing there and are
+> honoured rather than revisited: the span is a plain `f64` that may be negative, so
+> the span solve *returns* a negative answer where `single_sum::periods` reports
+> `NegativePeriods`; and a force of interest has no `−1` floor, so it needs a
+> `from_operation` funnel of its own rather than `Rate`'s.
+
 ## Context
 
 Continuous compounding (issue #22) is the limit of discrete compounding as the
