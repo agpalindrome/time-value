@@ -8,7 +8,9 @@
 //! ordinary and annuity-due), an amortization schedule conserves the principal it
 //! repays, currency rounding is idempotent, the dated XNPV agrees with the
 //! periodic NPV on whole-year offsets, `Money`'s arithmetic obeys the usual
-//! algebraic laws, the finite scalars' ordering is the ordering of the value they
+//! algebraic laws — `try_sum` is the `try_add` fold, `abs` and `signum` decompose an
+//! amount, `try_min`/`try_max` bracket their arguments — the finite scalars'
+//! ordering is the ordering of the value they
 //! wrap, and an owned cashflow series survives a `serde` round trip unchanged.
 //!
 //! `proptest` is a dev-dependency only, so it never reaches the published
@@ -145,6 +147,73 @@ proptest! {
         let money = Money::agnostic(amount).unwrap();
         let recovered = money.try_mul(factor).unwrap().try_div(factor).unwrap();
         prop_assert!(close(recovered.value(), amount, 1e-6 + 1e-12 * amount.abs()));
+    }
+
+    /// `try_sum` *is* the left-to-right `try_add` fold from `Money::ZERO` (ADR-0061),
+    /// over whole families of series rather than the worked example the unit tests
+    /// pin — including the empty one, which must give `Money::ZERO`. Amounts are
+    /// bounded well inside `f64` range, so no partial sum can overflow and every
+    /// call must be `Ok`.
+    #[test]
+    fn try_sum_is_the_try_add_fold(
+        amounts in prop::collection::vec(-1e9f64..1e9, 0..=32),
+    ) {
+        let flows: Vec<Money> = amounts.iter().map(|&a| Money::agnostic(a).unwrap()).collect();
+        let mut folded = Money::ZERO;
+        for &flow in &flows {
+            folded = folded.try_add(flow).unwrap();
+        }
+        prop_assert_eq!(Money::try_sum(flows.iter().copied()).unwrap(), folded);
+        // Totalling the negated series negates the total: the fold is linear.
+        prop_assert_eq!(
+            Money::try_sum(flows.iter().map(|&m| -m)).unwrap(),
+            -folded
+        );
+    }
+
+    /// `abs` and `signum` decompose an amount into a magnitude and a direction that
+    /// multiply back to it *exactly* — both are sign operations, so no arithmetic is
+    /// lost (ADR-0061). `abs` is idempotent and never negative, and `signum` agrees
+    /// with the raw value's direction.
+    #[test]
+    fn abs_and_signum_decompose_the_amount(amount in -1e12f64..1e12) {
+        let money = Money::agnostic(amount).unwrap();
+
+        prop_assert_eq!(money.abs(), Money::agnostic(amount.abs()).unwrap());
+        prop_assert_eq!(money.abs().abs(), money.abs());
+        prop_assert!(money.abs().value() >= 0.0);
+        prop_assert_eq!(money.abs(), (-money).abs());
+        // |x| · sgn(x) = x, for the zero case too (0 · 0 = 0).
+        prop_assert_eq!(money.abs().try_mul(money.signum()).unwrap(), money);
+        // Spelled as inequalities: the crate denies `clippy::float_cmp`.
+        prop_assert_eq!(money.signum() > 0.0, amount > 0.0);
+        prop_assert_eq!(money.signum() < 0.0, amount < 0.0);
+    }
+
+    /// `try_min`/`try_max` select one of their two arguments, bracket both, are
+    /// commutative, and between them account for the pair — the properties an
+    /// infallible `min`/`max` would have, holding wherever the partial ordering is
+    /// defined (ADR-0059, ADR-0061).
+    #[test]
+    fn try_min_and_try_max_bracket_their_arguments(
+        a in -1e12f64..1e12,
+        b in -1e12f64..1e12,
+    ) {
+        let (x, y) = (Money::agnostic(a).unwrap(), Money::agnostic(b).unwrap());
+        let lo = x.try_min(y).unwrap();
+        let hi = x.try_max(y).unwrap();
+
+        // The answer is one of the arguments, not a computed value …
+        prop_assert!(lo == x || lo == y);
+        prop_assert!(hi == x || hi == y);
+        // … it brackets them both …
+        prop_assert!(lo <= x && lo <= y);
+        prop_assert!(hi >= x && hi >= y);
+        // … the two together are the pair, in some order …
+        prop_assert_eq!(lo.try_add(hi).unwrap(), x.try_add(y).unwrap());
+        // … and neither depends on the argument order.
+        prop_assert_eq!(lo, y.try_min(x).unwrap());
+        prop_assert_eq!(hi, y.try_max(x).unwrap());
     }
 
     /// Every installment accounts for its whole payment: the interest on the

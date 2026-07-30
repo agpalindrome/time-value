@@ -57,14 +57,21 @@ use crate::{Currency, TvmError};
 ///
 /// # Arithmetic
 ///
-/// Negation is a [`Neg`] operator: negating a finite amount is always finite, so
-/// it cannot fail. Addition, subtraction and scaling *can* leave `f64` range (and
+/// Negation is a [`Neg`] operator, and [`abs`](Self::abs) / [`signum`](Self::signum)
+/// are plain methods: each is a sign operation on an already-finite amount, so none
+/// of them can fail. Addition, subtraction and scaling *can* leave `f64` range (and
 /// addition/subtraction can find mismatched currencies), so they are fallible
 /// [`try_add`](Self::try_add), [`try_sub`](Self::try_sub),
 /// [`try_mul`](Self::try_mul) and [`try_div`](Self::try_div) methods rather than
 /// operators — an operator cannot return a `Result`, and silently yielding an
 /// infinity is the foot-gun this crate exists to avoid
 /// (`docs/adr/0023-money-arithmetic-surface.md`).
+///
+/// [`try_sum`](Self::try_sum) totals an iterator for the same reason there is no
+/// [`Sum`](core::iter::Sum) impl, and [`try_min`](Self::try_min) /
+/// [`try_max`](Self::try_max) exist because the ordering below is *partial*, so
+/// `Money` has no [`Ord`] to take `min`/`max` from
+/// (`docs/adr/0061-money-and-currency-ergonomics.md`).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Money {
     magnitude: f64,
@@ -164,6 +171,48 @@ impl Money {
         Self::from_operation(self.magnitude - rhs.magnitude, currency)
     }
 
+    /// Totals `amounts`, folding their currencies by the [`Currency::Xxx`] identity
+    /// rule — the n-ary counterpart to [`try_add`](Self::try_add).
+    ///
+    /// An **empty** iterator sums to [`ZERO`](Self::ZERO) (`0 XXX`), the additive
+    /// identity. The fold runs left to right from that identity, so an agnostic
+    /// amount adopts whatever currency the rest of the series names, and a series of
+    /// agnostic amounts stays agnostic.
+    ///
+    /// This is deliberately *not* a [`Sum`](core::iter::Sum) impl. `Sum::sum`
+    /// returns `Self`, so it could only panic or hand back a non-finite `Money` on
+    /// overflow, and it could not report a currency mismatch at all — the two ways
+    /// summing money genuinely fails (ADR-0021, ADR-0034,
+    /// `docs/adr/0061-money-and-currency-ergonomics.md`).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TvmError::CurrencyMismatch`] if two amounts are in distinct
+    /// non-`Xxx` currencies — `left` is the currency accumulated from the amounts so
+    /// far and `right` the offending amount's, as everywhere else the crate folds a
+    /// series (ADR-0052) — or [`TvmError::Overflow`] if a running total leaves the
+    /// finite `f64` range.
+    ///
+    /// ```
+    /// use time_value::{Currency, Money};
+    ///
+    /// let flows = [
+    ///     Money::new(-100.0, Currency::Usd)?,
+    ///     Money::new(60.0, Currency::Usd)?,
+    ///     Money::new(60.0, Currency::Usd)?,
+    /// ];
+    /// let total = Money::try_sum(flows.iter().copied())?;
+    /// assert_eq!(total.value(), 20.0);
+    /// assert_eq!(total.currency(), Currency::Usd);
+    ///
+    /// // Nothing to total is zero, and currency-agnostic.
+    /// assert_eq!(Money::try_sum([])?, Money::ZERO);
+    /// # Ok::<(), time_value::TvmError>(())
+    /// ```
+    pub fn try_sum<I: IntoIterator<Item = Self>>(amounts: I) -> Result<Self, TvmError> {
+        amounts.into_iter().try_fold(Self::ZERO, Self::try_add)
+    }
+
     /// Scales by `factor` — e.g. `payment.try_mul(12.0)` for an annual total. The
     /// currency is preserved.
     ///
@@ -197,6 +246,154 @@ impl Money {
             return Err(TvmError::NonFiniteScalar);
         }
         Self::from_operation(self.magnitude / divisor, self.currency)
+    }
+
+    /// The amount with its sign removed — `|−25 USD|` is `25 USD`. The currency is
+    /// preserved.
+    ///
+    /// Infallible, like [`Neg`]: the absolute value of a finite amount is finite
+    /// (ADR-0021), so this is an operator-grade operation by ADR-0023's test. It is
+    /// a sign flip rather than a call to `f64::abs` (a `std`-only intrinsic), so it
+    /// is available in the default `no_std`, zero-dependency build alongside the
+    /// rest of `Money`'s arithmetic. A negative zero comes back as a positive one,
+    /// exactly as `f64::abs` would give.
+    ///
+    /// ```
+    /// use time_value::{Currency, Money};
+    ///
+    /// let outflow = Money::new(-25.0, Currency::Usd)?;
+    /// assert_eq!(outflow.abs().value(), 25.0);
+    /// assert_eq!(outflow.abs().currency(), Currency::Usd); // currency preserved
+    /// # Ok::<(), time_value::TvmError>(())
+    /// ```
+    #[must_use]
+    pub fn abs(self) -> Self {
+        Self {
+            // `is_sign_negative` rather than `< 0.0` so that `-0.0` normalises to
+            // `0.0`, as `f64::abs` does; `Money::new(-0.0, c) == Money::new(0.0, c)`,
+            // so leaving the sign bit on would make two equal amounts render
+            // differently (`-0` vs `0`).
+            magnitude: if self.magnitude.is_sign_negative() {
+                -self.magnitude
+            } else {
+                self.magnitude
+            },
+            currency: self.currency,
+        }
+    }
+
+    /// The sign of the amount as a plain number: `1.0` for an inflow, `-1.0` for an
+    /// outflow, `0.0` for zero. A sign has no denomination, so the currency is not
+    /// part of the answer — but it is not consulted either, so an amount's sign is
+    /// the same in any currency.
+    ///
+    /// **This differs from `f64::signum` at zero**, deliberately. `f64::signum`
+    /// reports `1.0` for `+0.0` and `-1.0` for `-0.0`, but `Money::new(0.0, c)` and
+    /// `Money::new(-0.0, c)` are *equal* (`-0.0 == 0.0`), so delegating would let
+    /// two equal amounts report opposite signs — the sign would depend on how the
+    /// zero was spelled. Zero is also neither an inflow nor an outflow under the
+    /// crate's signed-cashflow convention, so `0.0` is the honest third answer
+    /// (`docs/adr/0061-money-and-currency-ergonomics.md`).
+    ///
+    /// ```
+    /// use time_value::{Currency, Money};
+    ///
+    /// assert_eq!(Money::new(25.0, Currency::Usd)?.signum(), 1.0);
+    /// assert_eq!(Money::new(-25.0, Currency::Usd)?.signum(), -1.0);
+    /// assert_eq!(Money::ZERO.signum(), 0.0); // not `f64::signum`'s 1.0
+    /// # Ok::<(), time_value::TvmError>(())
+    /// ```
+    #[must_use]
+    pub fn signum(self) -> f64 {
+        if self.magnitude > 0.0 {
+            1.0
+        } else if self.magnitude < 0.0 {
+            -1.0
+        } else {
+            0.0 // both zeros; no `NaN` can reach here (every `Money` is finite)
+        }
+    }
+
+    /// The smaller of the two amounts, denominated in the currency the two combine
+    /// to.
+    ///
+    /// **Fallible because `Money`'s ordering is partial.** Two distinct non-`Xxx`
+    /// currencies do not compare — `100 USD` against `100 EUR` has no answer, so
+    /// [`PartialOrd`] returns `None` and `Money` has no [`Ord`] and none of `Ord`'s
+    /// infallible `min`/`max`/`clamp` (ADR-0059). An infallible `Money::min` would
+    /// have to invent an answer for that pair; this returns the mismatch instead,
+    /// and the `try_` prefix says so at the call site, as it does for
+    /// [`try_add`](Self::try_add).
+    ///
+    /// The currency is folded by the [`Currency::Xxx`] identity rule, exactly as
+    /// [`try_add`](Self::try_add) folds it, so the result is denominated even when
+    /// the selected side was the agnostic one: the smaller of `0 XXX` and `100 USD`
+    /// is `0 USD`. That is also what makes the operation commutative — on a tie
+    /// between an agnostic and a denominated amount, an unfolded currency would
+    /// answer differently depending on the argument order.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TvmError::CurrencyMismatch`] if the two amounts are in distinct
+    /// non-`Xxx` currencies. Nothing else can go wrong: the magnitude returned is
+    /// one of the two given, so there is no arithmetic to overflow.
+    ///
+    /// ```
+    /// use time_value::{Currency, Money};
+    ///
+    /// let floor = Money::new(50.0, Currency::Usd)?;
+    /// let fee = Money::new(75.0, Currency::Usd)?;
+    /// assert_eq!(fee.try_min(floor)?, floor);
+    /// assert_eq!(fee.try_max(floor)?, fee);
+    ///
+    /// // The agnostic identity is folded away, so the result stays denominated.
+    /// assert_eq!(Money::ZERO.try_min(fee)?.currency(), Currency::Usd);
+    /// # Ok::<(), time_value::TvmError>(())
+    /// ```
+    pub fn try_min(self, other: Self) -> Result<Self, TvmError> {
+        self.select(other, other.magnitude < self.magnitude)
+    }
+
+    /// The larger of the two amounts, denominated in the currency the two combine
+    /// to. The fallible counterpart to [`try_min`](Self::try_min), for the same
+    /// reason: `Money`'s ordering is partial (ADR-0059).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TvmError::CurrencyMismatch`] if the two amounts are in distinct
+    /// non-`Xxx` currencies. It cannot overflow.
+    ///
+    /// ```
+    /// use time_value::{Currency, Money};
+    ///
+    /// let cap = Money::new(100.0, Currency::Eur)?;
+    /// let claim = Money::new(140.0, Currency::Eur)?;
+    /// assert_eq!(claim.try_max(cap)?, claim);
+    ///
+    /// // Distinct currencies have no larger one.
+    /// assert!(claim.try_max(Money::new(140.0, Currency::Usd)?).is_err());
+    /// # Ok::<(), time_value::TvmError>(())
+    /// ```
+    pub fn try_max(self, other: Self) -> Result<Self, TvmError> {
+        self.select(other, other.magnitude > self.magnitude)
+    }
+
+    /// The shared body of [`try_min`](Self::try_min) and [`try_max`](Self::try_max):
+    /// fold the two currencies, then keep `other`'s magnitude if `take_other`.
+    ///
+    /// Both magnitudes are finite by construction, so the caller's comparison is a
+    /// total one — no `NaN` arm to consider. A tie keeps `self`'s magnitude, which is
+    /// immaterial: equal magnitudes in one folded currency are the same `Money`.
+    fn select(self, other: Self, take_other: bool) -> Result<Self, TvmError> {
+        let currency = combine(self.currency, other.currency)?;
+        Ok(Self {
+            magnitude: if take_other {
+                other.magnitude
+            } else {
+                self.magnitude
+            },
+            currency,
+        })
     }
 
     /// Rounds the magnitude to this amount's currency minor unit — a *presentation*
@@ -858,6 +1055,228 @@ mod tests {
         // 0 / 0 is undefined, not zero.
         assert_eq!(Money::ZERO.try_div(0.0), Err(TvmError::DivisionByZero));
         assert_eq!(huge().try_div(0.5), Err(TvmError::Overflow));
+    }
+
+    #[test]
+    fn abs_removes_the_sign_and_keeps_the_currency() {
+        let outflow = Money::new(-25.0, Currency::Usd).unwrap();
+        assert_eq!(outflow.abs().value(), 25.0);
+        assert_eq!(outflow.abs().currency(), Currency::Usd);
+        // Already positive, and the extremes: `abs` is closed over finite `f64`, so
+        // it needs no `Result` (ADR-0021).
+        assert_eq!(Money::new(25.0, Currency::Eur).unwrap().abs().value(), 25.0);
+        assert_eq!(huge().abs(), huge());
+        assert_eq!((-huge()).abs(), huge());
+    }
+
+    /// `abs` is idempotent and a fixed point of negation-then-`abs`, over every
+    /// currency in the closed set — the currency is preserved, never folded away
+    /// (ADR-0061). Iterated rather than sampled (ADR-0045 rule 2).
+    #[test]
+    fn abs_preserves_every_currency() {
+        for &currency in Currency::ALL {
+            let outflow = Money::new(-12.5, currency).unwrap();
+            assert_eq!(outflow.abs().currency(), currency, "{}", currency.code());
+            assert_eq!(outflow.abs(), (-outflow).abs());
+            assert_eq!(outflow.abs().abs(), outflow.abs());
+        }
+    }
+
+    /// `f64::abs(-0.0)` is `0.0`, and so is this: `Money::new(-0.0, c)` equals
+    /// `Money::new(0.0, c)`, so leaving the sign bit on would let two *equal*
+    /// amounts render differently (`-0` against `0`).
+    #[test]
+    fn abs_normalises_a_negative_zero() {
+        let negative_zero = Money::new(-0.0, Currency::Usd).unwrap();
+        assert!(negative_zero.value().is_sign_negative());
+        assert!(negative_zero.abs().value().is_sign_positive());
+        assert_eq!(negative_zero.abs().currency(), Currency::Usd);
+    }
+
+    #[test]
+    fn signum_reports_the_direction_of_the_flow() {
+        assert_eq!(Money::new(25.0, Currency::Usd).unwrap().signum(), 1.0);
+        assert_eq!(Money::new(-25.0, Currency::Usd).unwrap().signum(), -1.0);
+        assert_eq!(huge().signum(), 1.0);
+        assert_eq!((-huge()).signum(), -1.0);
+        // The currency is not consulted: the sign is the same in any of them.
+        for &currency in Currency::ALL {
+            assert_eq!(Money::new(-1.0, currency).unwrap().signum(), -1.0);
+        }
+    }
+
+    /// The documented divergence from `f64::signum`, which answers `1.0` for `+0.0`
+    /// and `-1.0` for `-0.0`. Two `Money` values that compare equal must not report
+    /// opposite signs, and the two zeros *are* equal — so both answer `0.0`
+    /// (ADR-0061).
+    #[test]
+    fn signum_of_either_zero_is_zero() {
+        let positive = Money::new(0.0, Currency::Usd).unwrap();
+        let negative = Money::new(-0.0, Currency::Usd).unwrap();
+        assert_eq!(positive, negative);
+        assert_eq!(positive.signum(), 0.0);
+        assert_eq!(negative.signum(), 0.0);
+        assert_eq!(Money::ZERO.signum(), 0.0);
+        // The claim this test exists to defend.
+        assert_eq!((-0.0f64).signum(), -1.0);
+    }
+
+    #[test]
+    fn try_min_and_try_max_select_by_magnitude() {
+        let small = Money::new(50.0, Currency::Usd).unwrap();
+        let large = Money::new(75.0, Currency::Usd).unwrap();
+        assert_eq!(small.try_min(large).unwrap(), small);
+        assert_eq!(large.try_min(small).unwrap(), small);
+        assert_eq!(small.try_max(large).unwrap(), large);
+        assert_eq!(large.try_max(small).unwrap(), large);
+        // Signed cashflows: an outflow is the smaller amount, not the smaller
+        // magnitude.
+        let outflow = Money::new(-100.0, Currency::Usd).unwrap();
+        assert_eq!(outflow.try_min(small).unwrap(), outflow);
+        assert_eq!(outflow.try_max(small).unwrap(), small);
+    }
+
+    /// Two distinct non-`Xxx` currencies are *unordered* (`partial_cmp` is `None`),
+    /// so there is no smaller or larger one and the answer is the mismatch, named in
+    /// argument order (ADR-0052). This is the whole reason the two are `try_`
+    /// (ADR-0059, ADR-0061).
+    #[test]
+    fn try_min_and_try_max_report_unordered_currencies() {
+        let usd = Money::new(100.0, Currency::Usd).unwrap();
+        let eur = Money::new(200.0, Currency::Eur).unwrap();
+        assert_eq!(usd.partial_cmp(&eur), None);
+
+        let mismatch = TvmError::CurrencyMismatch {
+            left: Currency::Usd,
+            right: Currency::Eur,
+        };
+        assert_eq!(usd.try_min(eur), Err(mismatch.clone()));
+        assert_eq!(usd.try_max(eur), Err(mismatch));
+        assert_eq!(
+            eur.try_min(usd),
+            Err(TvmError::CurrencyMismatch {
+                left: Currency::Eur,
+                right: Currency::Usd,
+            })
+        );
+    }
+
+    /// The currency is folded by the `Xxx` identity rule, as `try_add` folds it, so
+    /// selecting the agnostic side still yields a denominated result — and the
+    /// operation is commutative even on a tie, which an unfolded currency would not
+    /// be (ADR-0061).
+    #[test]
+    fn try_min_and_try_max_fold_the_currency() {
+        let usd = Money::new(100.0, Currency::Usd).unwrap();
+        let agnostic_lower = Money::agnostic(50.0).unwrap();
+
+        let min = usd.try_min(agnostic_lower).unwrap();
+        assert_eq!(min.value(), 50.0);
+        assert_eq!(min.currency(), Currency::Usd); // not `Xxx`
+        assert_eq!(usd.try_max(agnostic_lower).unwrap(), usd);
+
+        // A tie: whichever side is selected, the answer is the same `Money`.
+        let tie = Money::agnostic(100.0).unwrap();
+        assert_eq!(usd.try_min(tie).unwrap(), tie.try_min(usd).unwrap());
+        assert_eq!(usd.try_min(tie).unwrap().currency(), Currency::Usd);
+        assert_eq!(usd.try_max(tie).unwrap().currency(), Currency::Usd);
+
+        // Two agnostic amounts stay agnostic.
+        assert_eq!(
+            agnostic_lower.try_min(tie).unwrap().currency(),
+            Currency::Xxx
+        );
+    }
+
+    #[test]
+    fn try_sum_totals_a_series() {
+        let flows = [
+            Money::new(-100.0, Currency::Usd).unwrap(),
+            Money::new(60.0, Currency::Usd).unwrap(),
+            Money::new(60.0, Currency::Usd).unwrap(),
+        ];
+        let total = Money::try_sum(flows.iter().copied()).unwrap();
+        assert_eq!(total.value(), 20.0);
+        assert_eq!(total.currency(), Currency::Usd);
+        // An array, a `map`, and a single amount all work: any `IntoIterator`.
+        assert_eq!(Money::try_sum(flows).unwrap(), total);
+        assert_eq!(
+            Money::try_sum(flows.iter().map(|m| -*m)).unwrap().value(),
+            -20.0
+        );
+        assert_eq!(Money::try_sum([total]).unwrap(), total);
+    }
+
+    /// The documented empty case: nothing to total is `Money::ZERO`, the additive
+    /// identity, and currency-agnostic (ADR-0061).
+    #[test]
+    fn try_sum_of_nothing_is_zero() {
+        assert_eq!(Money::try_sum([]).unwrap(), Money::ZERO);
+        assert_eq!(Money::try_sum([]).unwrap().currency(), Currency::Xxx);
+        assert_eq!(Money::try_sum(core::iter::empty()).unwrap(), Money::ZERO);
+    }
+
+    /// `try_sum` folds the currency exactly as `try_add` does — the `Xxx` identity
+    /// adopts, and the first clash is reported with `left` the currency accumulated
+    /// so far and `right` the offending flow's (ADR-0052, ADR-0057).
+    #[test]
+    fn try_sum_folds_the_currency_and_names_the_first_clash() {
+        let usd = Money::new(10.0, Currency::Usd).unwrap();
+        let eur = Money::new(10.0, Currency::Eur).unwrap();
+        let gbp = Money::new(10.0, Currency::Gbp).unwrap();
+
+        // A leading agnostic amount adopts the currency that follows it.
+        assert_eq!(
+            Money::try_sum([Money::agnostic(5.0).unwrap(), usd])
+                .unwrap()
+                .currency(),
+            Currency::Usd
+        );
+        // The fold stops at the *first* clash, whatever follows it.
+        assert_eq!(
+            Money::try_sum([usd, eur, gbp]),
+            Err(TvmError::CurrencyMismatch {
+                left: Currency::Usd,
+                right: Currency::Eur,
+            })
+        );
+        assert_eq!(
+            Money::try_sum([usd, usd, gbp, eur]),
+            Err(TvmError::CurrencyMismatch {
+                left: Currency::Usd,
+                right: Currency::Gbp,
+            })
+        );
+    }
+
+    /// A running total that leaves the finite range is an `Overflow`, through the
+    /// same funnel as `try_add` (ADR-0021, ADR-0023) — `Money` never holds an
+    /// infinity, not even mid-fold.
+    #[test]
+    fn try_sum_reports_overflow() {
+        assert_eq!(Money::try_sum([huge(), huge()]), Err(TvmError::Overflow));
+        // The overflow is in the *running* total: the mathematical sum here is
+        // representable, but the left-to-right fold passes through `2 · f64::MAX`.
+        assert_eq!(
+            Money::try_sum([huge(), huge(), -huge()]),
+            Err(TvmError::Overflow)
+        );
+    }
+
+    /// `try_sum` is the `try_add` fold, so it must agree with one written by hand.
+    #[test]
+    fn try_sum_agrees_with_a_hand_written_fold() {
+        let flows = [
+            Money::new(-1000.0, Currency::Jpy).unwrap(),
+            Money::new(250.5, Currency::Jpy).unwrap(),
+            Money::agnostic(0.25).unwrap(),
+            Money::new(-0.75, Currency::Jpy).unwrap(),
+        ];
+        let mut folded = Money::ZERO;
+        for flow in flows {
+            folded = folded.try_add(flow).unwrap();
+        }
+        assert_eq!(Money::try_sum(flows).unwrap(), folded);
     }
 
     #[test]

@@ -41,7 +41,7 @@ the old one **Superseded** (link both ways) — don't rewrite the old one.
 | [0020](0020-robust-irr-newton-with-bisection-fallback.md) | Robust IRR — Newton with a bisection fallback | Accepted (amended by 0021, 0025, 0054) |
 | [0021](0021-fallible-operations-on-non-finite-results.md) | Operations are fallible when their result can be non-finite | Accepted (amended by 0023, 0054) |
 | [0022](0022-core-first-sequencing-before-the-first-release.md) | Core-first sequencing before the first release | Accepted |
-| [0023](0023-money-arithmetic-surface.md) | The `Money` arithmetic surface — `Neg` and `try_*` | Accepted |
+| [0023](0023-money-arithmetic-surface.md) | The `Money` arithmetic surface — `Neg` and `try_*` | Accepted (amended by 0061) |
 | [0024](0024-rate-conversions-effective-and-nominal.md) | Rate conversions — effective between periodicities, nominal as a quote | Accepted |
 | [0025](0025-solve-for-periods-and-rate.md) | Solve for periods (NPER) and rate (RATE) | Accepted |
 | [0026](0026-modified-internal-rate-of-return.md) | Modified internal rate of return (MIRR) | Accepted |
@@ -50,7 +50,7 @@ the old one **Superseded** (link both ways) — don't rewrite the old one.
 | [0029](0029-dated-cashflows-xnpv-xirr.md) | Dated cashflows — XNPV / XIRR | Accepted (amended by 0030) |
 | [0030](0030-shared-day-count-support-crate.md) | Shared day-count support crate | Accepted |
 | [0031](0031-split-non-finite-result-into-overflow-and-undefined.md) | Split `NonFiniteResult` into `Overflow` and `Undefined` | Accepted |
-| [0032](0032-ergonomic-convenience-impls.md) | Ergonomic convenience impls (`ZERO` / `Default` / `TryFrom` / `From`) | Accepted |
+| [0032](0032-ergonomic-convenience-impls.md) | Ergonomic convenience impls (`ZERO` / `Default` / `TryFrom` / `From`) | Accepted (amended by 0061) |
 | [0033](0033-core-domain-model-two-axes-and-an-f64-engine.md) | Core domain model — two axes, and an `f64` computation engine | Accepted |
 | [0034](0034-money-and-currency.md) | Money and currency — `f64` magnitude, a runtime ISO-4217 enum, and FX | Accepted (amended by 0053, 0057, 0058) |
 | [0035](0035-periodicity-tagged-time.md) | Periodicity-tagged time (`Period<P>`) | Accepted (amended by 0059) |
@@ -70,7 +70,7 @@ the old one **Superseded** (link both ways) — don't rewrite the old one.
 | [0049](0049-growing-annuity-in-the-binaries.md) | The growing annuity in the binaries | Accepted |
 | [0050](0050-role-newtypes-for-ambiguous-arguments.md) | Role newtypes for transposable arguments | Accepted (extends 0005) |
 | [0051](0051-installment-private-fields.md) | `Installment`'s fields are private, read through accessors | Accepted (amends 0027) |
-| [0052](0052-tvmerror-variant-granularity.md) | `TvmError` variant granularity — a payload on `CurrencyMismatch`, `Undefined` split | Accepted (amends 0004, 0031) |
+| [0052](0052-tvmerror-variant-granularity.md) | `TvmError` variant granularity — a payload on `CurrencyMismatch`, `Undefined` split | Accepted (amends 0004, 0031; extended by 0061) |
 | [0053](0053-fxrate-domain-and-currency-ordering.md) | `FxRate`'s domain is closed under reciprocal, `from` → `source`, and `Currency`'s ordering policy | Accepted (amends 0034) |
 | [0054](0054-numeric-robustness-of-the-core-operations.md) | Numeric robustness — schedule termination, rounding finiteness, cancellation-free annuity factors, and what counts as a root | Accepted (amends 0020, 0021, 0027) |
 | [0055](0055-publish-readiness-of-the-packaged-crate.md) | Publish readiness — what ships in the tarball, and a README that cannot rot | Accepted (amends 0006) |
@@ -79,3 +79,4 @@ the old one **Superseded** (link both ways) — don't rewrite the old one.
 | [0058](0058-money-display-carries-its-currency.md) | `Money`'s `Display` carries its currency — bare for `XXX`, magnitude then ISO code otherwise | Accepted (amends 0034) |
 | [0059](0059-the-finite-scalars-are-totally-ordered.md) | The finite-by-construction scalars are totally ordered (`Eq` + `Ord`), `Money` stays partial | Accepted (amends 0035, extends 0005) |
 | [0060](0060-owned-cashflows-on-the-wire.md) | `OwnedCashflows` on the wire — a bare array of `Money`, no periodicity | Accepted (amends 0042, 0043; extends 0044) |
+| [0061](0061-money-and-currency-ergonomics.md) | `Money`/`Currency` ergonomics — `try_sum` not `Sum`, fallible `min`/`max`, infallible sign, lenient `FromStr` | Accepted (amends 0023, 0032; extends 0052) |

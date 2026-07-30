@@ -15,6 +15,8 @@
 
 use core::fmt;
 
+use crate::TvmError;
+
 /// An ISO 4217 currency.
 ///
 /// A plain `Copy` enum: equality, hashing and ordering are trivial, and its
@@ -478,7 +480,11 @@ impl Currency {
     ///
     /// Total and canonical: the match is case-sensitive (uppercase, as ISO
     /// defines the codes) and returns `None` for any string that is not exactly
-    /// one of the known codes.
+    /// one of the known codes. This is the strict lookup, and the one the
+    /// `serde` wire format uses; the [`FromStr`] impl is the human-input door onto
+    /// the same table and accepts any casing (ADR-0061).
+    ///
+    /// [`FromStr`]: core::str::FromStr
     #[must_use]
     #[allow(clippy::too_many_lines)] // one arm per ISO 4217 code (generated)
     pub fn from_code(code: &str) -> Option<Self> {
@@ -1748,6 +1754,72 @@ impl Default for Currency {
     }
 }
 
+/// Parses an ISO 4217 alphabetic code, **case-insensitively** — the round trip of
+/// [`Display`](fmt::Display), and the door user input comes through (a CLI argument,
+/// an environment variable, a query parameter).
+///
+/// # Case
+///
+/// `"USD"`, `"usd"` and `"Usd"` all parse to [`Usd`](Self::Usd), while
+/// [`from_code`](Self::from_code) accepts only `"USD"`. The divergence is deliberate
+/// and one-directional: every string `from_code` accepts, this accepts identically,
+/// so the two never disagree about a *result* — only about which inputs to reject.
+/// `from_code` stays the strict, canonical lookup (it is what the `serde` wire format
+/// validates through, where a machine has no excuse for the wrong case), and
+/// `FromStr` is the lenient one, because `"usd".parse()` failing is a papercut on
+/// every human-facing surface (ADR-0061).
+///
+/// Leniency stops at case. There is no trimming, no numeric-code form, and no other
+/// length: exactly three ASCII letters naming a known code.
+///
+/// # Errors
+///
+/// Returns [`TvmError::UnknownCurrencyCode`] for anything else. The error type is
+/// [`TvmError`] rather than a dedicated one so a parse threads with `?` through the
+/// same `Result<_, TvmError>` as the rest of the crate (ADR-0061).
+///
+/// ```
+/// use time_value::{Currency, TvmError};
+///
+/// assert_eq!("USD".parse::<Currency>()?, Currency::Usd);
+/// assert_eq!("jpy".parse::<Currency>()?, Currency::Jpy);
+/// assert_eq!("Eur".parse::<Currency>()?, Currency::Eur);
+///
+/// // …and the strict lookup is unchanged.
+/// assert_eq!(Currency::from_code("usd"), None);
+///
+/// for rejected in ["ZZZ", "US", "USDD", " USD", "840", ""] {
+///     assert_eq!(rejected.parse::<Currency>(), Err(TvmError::UnknownCurrencyCode));
+/// }
+/// # Ok::<(), time_value::TvmError>(())
+/// ```
+impl core::str::FromStr for Currency {
+    type Err = TvmError;
+
+    fn from_str(code: &str) -> Result<Self, Self::Err> {
+        // Exactly three bytes, uppercased in place, then handed to the canonical
+        // table — so `from_code` stays the single source of truth for which strings
+        // name a currency. The slice pattern rejects every other length, including
+        // the empty string, before any of that.
+        let &[a, b, c] = code.as_bytes() else {
+            return Err(TvmError::UnknownCurrencyCode);
+        };
+        let upper = [
+            a.to_ascii_uppercase(),
+            b.to_ascii_uppercase(),
+            c.to_ascii_uppercase(),
+        ];
+        // ASCII-uppercasing touches only bytes below `0x80`, each of which is a
+        // standalone UTF-8 code point, so `upper` is still valid UTF-8 and this arm
+        // is unreachable. It is answered rather than unwrapped: the core is
+        // panic-free by construction, not by a message nobody reads.
+        core::str::from_utf8(&upper)
+            .ok()
+            .and_then(Self::from_code)
+            .ok_or(TvmError::UnknownCurrencyCode)
+    }
+}
+
 /// Formats as the ISO 4217 alphabetic code (`"USD"`).
 impl fmt::Display for Currency {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -1758,6 +1830,7 @@ impl fmt::Display for Currency {
 #[cfg(test)]
 mod tests {
     use super::Currency;
+    use crate::TvmError;
 
     // Compile-time tripwire against `Currency::ALL` drift (ADR-0045). `meta`
     // already forces every variant to carry metadata; this forces every variant
@@ -1858,6 +1931,65 @@ mod tests {
         assert_eq!(Currency::from_code("usd"), None); // case-sensitive
         assert_eq!(Currency::from_code(""), None);
         assert_eq!(Currency::from_code("US"), None);
+    }
+
+    /// `FromStr` round-trips [`Currency::code`] for **every** currency — the closed
+    /// set is iterated, not sampled (ADR-0045 rule 2) — and does so in any casing,
+    /// which is the leniency `from_code` does not have (ADR-0061).
+    #[test]
+    fn from_str_round_trips_every_code_in_any_case() {
+        use core::str::FromStr as _;
+
+        for &c in Currency::ALL {
+            let upper = c.code();
+            assert_eq!(upper.parse::<Currency>(), Ok(c), "{upper}");
+            // The three casings a caller can produce without allocating: as ISO
+            // writes it, all lower, and title case. `code()` is three ASCII letters,
+            // so byte-wise casing is exact.
+            let bytes = upper.as_bytes();
+            let lower = [
+                bytes[0].to_ascii_lowercase(),
+                bytes[1].to_ascii_lowercase(),
+                bytes[2].to_ascii_lowercase(),
+            ];
+            let title = [bytes[0], lower[1], lower[2]];
+            for variant in [lower, title] {
+                let s = core::str::from_utf8(&variant).unwrap();
+                assert_eq!(s.parse::<Currency>(), Ok(c), "{s} should parse as {upper}");
+            }
+            // …and the parse agrees with the strict lookup wherever that one answers.
+            assert_eq!(Currency::from_str(upper).ok(), Currency::from_code(upper));
+        }
+    }
+
+    /// Everything `FromStr` rejects, and the one error it reports. Leniency stops at
+    /// case: no trimming, no numeric code, no other length (ADR-0061).
+    #[test]
+    fn from_str_rejects_anything_that_is_not_a_code() {
+        for rejected in [
+            "", "U", "US", "USDD", " USD", "USD ", "U SD", "ZZZ", "zzz", "840", "\0\0\0",
+            // Three *bytes* of valid UTF-8 that are not three ASCII letters: the
+            // uppercasing leaves non-ASCII bytes alone, so the lookup simply misses.
+            "€",
+        ] {
+            assert_eq!(
+                rejected.parse::<Currency>(),
+                Err(TvmError::UnknownCurrencyCode),
+                "{rejected:?} should not parse"
+            );
+        }
+    }
+
+    /// The error's rendered message, since the variant exists to be reported
+    /// (ADR-0052 pins `Display` for the same reason).
+    #[test]
+    #[cfg(feature = "alloc")]
+    fn an_unknown_code_says_so_when_displayed() {
+        use alloc::string::ToString as _;
+        assert_eq!(
+            "ZZZ".parse::<Currency>().unwrap_err().to_string(),
+            "unknown ISO 4217 currency code"
+        );
     }
 
     #[test]

@@ -17,9 +17,11 @@ Values are validated newtypes, and **periodicity is part of the type**:
   `Currency` it is denominated in. Currency is a runtime *value*, not a type tag
   — `Currency::Xxx` is the currency-agnostic identity, and combining two distinct
   real currencies is a runtime `TvmError::CurrencyMismatch`. Cashflows are signed
-  (outflow negative, inflow positive). Negate it with `-money`; add, subtract and
-  scale it with the fallible `try_add` / `try_sub` / `try_mul` / `try_div`, which
-  return an error rather than an infinity.
+  (outflow negative, inflow positive). Negate it with `-money`, and take its
+  `abs` / `signum` infallibly; add, subtract, scale, total and compare it with the
+  fallible `try_add` / `try_sub` / `try_mul` / `try_div` / `try_sum` / `try_min` /
+  `try_max`, which return an error rather than an infinity (or, where the
+  currencies clash, rather than an invented answer).
 - `Rate<P>` — a per-period rate (finite, greater than −100%) tagged with a
   `Periodicity` marker `P` (`Annual`, `SemiAnnual`, `Quarterly`, `Monthly`,
   `Weekly`, `Daily`).
@@ -82,10 +84,15 @@ fn main() -> Result<(), TvmError> {
     let fee = Money::new(25.0, Currency::Usd)?;
     let rent = Money::new(1_200.0, Currency::Usd)?;
     assert_eq!(fee.try_add(rent)?.value(), 1_225.0);
+    assert_eq!(Money::try_sum([fee, rent])?.value(), 1_225.0);
+
+    // A code parses case-insensitively; `Currency::from_code` is the strict form.
+    assert_eq!("usd".parse::<Currency>()?, Currency::Usd);
 
     // Two distinct real currencies do not combine.
     let eur = Money::new(10.0, Currency::Eur)?;
     assert!(fee.try_add(eur).is_err());
+    assert!(fee.try_max(eur).is_err()); // …and so have no larger one
 
     Ok(())
 }
