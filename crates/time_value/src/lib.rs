@@ -58,7 +58,8 @@
 //! periodicities ([`Rate::convert`] / [`Rate::effective_annual`]),
 //! [`DatedCashflows`] (XNPV/XIRR over irregularly dated flows), and the
 //! [`continuous`] module (continuous compounding at a periodicity-free
-//! [`ContinuousRate`], with the `Rate<Annual>` bridge). Nominal-rate
+//! [`ContinuousRate`], its closed-form `rate` / `years` solves, and the
+//! `Rate<Annual>` bridge). Nominal-rate
 //! conversion ([`Rate::from_nominal_annual`] / [`Rate::nominal_annual`]) is plain
 //! arithmetic and needs no feature.
 //!
@@ -190,6 +191,7 @@ macro_rules! docs_rs_links {
 [`annuity::periods_from_future`]: https://docs.rs/time_value/latest/time_value/annuity/fn.periods_from_future.html
 [`annuity::rate`]: https://docs.rs/time_value/latest/time_value/annuity/fn.rate.html
 [`annuity::rate_from_future`]: https://docs.rs/time_value/latest/time_value/annuity/fn.rate_from_future.html
+[`annuity::due::rate`]: https://docs.rs/time_value/latest/time_value/annuity/due/fn.rate.html
 [`annuity::perpetuity`]: https://docs.rs/time_value/latest/time_value/annuity/fn.perpetuity.html
 [`annuity::growing_perpetuity`]: https://docs.rs/time_value/latest/time_value/annuity/fn.growing_perpetuity.html
 [`annuity::due::perpetuity`]: https://docs.rs/time_value/latest/time_value/annuity/due/fn.perpetuity.html
@@ -199,6 +201,8 @@ macro_rules! docs_rs_links {
 [`ContinuousRate`]: https://docs.rs/time_value/latest/time_value/struct.ContinuousRate.html
 [`DatedCashflow`]: https://docs.rs/time_value/latest/time_value/struct.DatedCashflow.html
 [`continuous`]: https://docs.rs/time_value/latest/time_value/continuous/index.html
+[`continuous::rate`]: https://docs.rs/time_value/latest/time_value/continuous/fn.rate.html
+[`continuous::years`]: https://docs.rs/time_value/latest/time_value/continuous/fn.years.html
 "
     };
 }
@@ -413,8 +417,10 @@ pub enum TvmError {
     /// which never grows one amount into a different one; a zero payment, which
     /// never accumulates to a target).
     ///
-    /// Returned by [`single_sum::periods`] and [`annuity::periods_from_future`]
-    /// (ADR-0052). Distinct from
+    /// Returned by [`single_sum::periods`], [`annuity::periods_from_future`], and
+    /// the continuous solves [`continuous::rate`] / [`continuous::years`], whose
+    /// shared domain is that `future / present` and its reciprocal are both positive
+    /// and finite (ADR-0052, ADR-0064). Distinct from
     /// [`SolveDidNotConverge`](Self::SolveDidNotConverge), where an answer may
     /// exist but the iteration did not find it: here the closed form proves there
     /// is none.
@@ -427,18 +433,39 @@ pub enum TvmError {
     ///
     /// The opposite failure to [`NoRealSolution`](Self::NoRealSolution): there the
     /// closed form proves no rate works; here it proves they all do, because the
-    /// annuity factor does not depend on the rate at all. That happens when
-    /// [`annuity::rate_from_future`] is given a single period — one payment made at
-    /// the end of period 1 is never compounded, so the future value is the payment
-    /// whatever the rate — and the target equals the payment.
+    /// factor relating the two amounts does not depend on the rate at all. That
+    /// happens when [`annuity::rate_from_future`] is given a single period — one
+    /// payment made at the end of period 1 is never compounded, so the future value
+    /// is the payment whatever the rate — and the target equals the payment;
+    /// [`annuity::due::rate`] over a single period is the mirror case, and
+    /// [`continuous::rate`] over a zero-length span the continuous one (ADR-0063,
+    /// ADR-0064).
     ///
     /// The inputs are under-determined rather than wrong: supply a longer term, or
-    /// solve for something the inputs do pin down (ADR-0056).
+    /// solve for something the inputs do pin down (ADR-0056). See
+    /// [`IndeterminateSpan`](Self::IndeterminateSpan) for the same failure with the
+    /// *span* as the unknown.
     #[cfg_attr(
         not(any(feature = "std", feature = "libm")),
         doc = docs_rs_links!()
     )]
     IndeterminateRate,
+    /// A solve for a **span in years** is satisfied by every span, so no single one
+    /// is the answer.
+    ///
+    /// The time-axis twin of [`IndeterminateRate`](Self::IndeterminateRate), and
+    /// separate from it because the unknown — and therefore the fix — is different.
+    /// [`continuous::years`] returns it when the force of interest is zero: nothing
+    /// grows, so `FV = PV` holds after any span whatever, and the remedy is a
+    /// non-zero force of interest rather than a longer term (ADR-0064).
+    ///
+    /// The inputs are under-determined rather than wrong; where *no* span satisfies
+    /// them, the answer is [`NoRealSolution`](Self::NoRealSolution) instead.
+    #[cfg_attr(
+        not(any(feature = "std", feature = "libm")),
+        doc = docs_rs_links!()
+    )]
+    IndeterminateSpan,
     /// A period count was negative or not finite.
     NegativePeriods,
     /// A duration in years, given as a plain `f64`, was not finite (`NaN` or an
@@ -520,6 +547,9 @@ impl fmt::Display for TvmError {
             Self::NoRealSolution => f.write_str("no real solution exists for these inputs"),
             Self::IndeterminateRate => {
                 f.write_str("every rate satisfies these inputs, so no single rate is the answer")
+            }
+            Self::IndeterminateSpan => {
+                f.write_str("every span satisfies these inputs, so no single span is the answer")
             }
             Self::NegativePeriods => f.write_str("period count must be finite and non-negative"),
             Self::NonFiniteOffset => f.write_str("dated cashflow year-offset must be finite"),

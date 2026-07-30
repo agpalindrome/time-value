@@ -24,8 +24,9 @@
 > `annuity::due` now has its `periods` and `rate` solves (from either anchor), and the
 > growing annuity has its present-anchored inverses. The note about `run_annuity` being
 > "the last flat arm that fits" is discharged too — ADR-0063 extracted the repeated
-> shapes, leaving that dispatcher shorter than it is here. #106's other three groups
-> (`continuous`, `DatedCashflows`, `Currency::from_numeric`) remain open.
+> shapes, leaving that dispatcher shorter than it is here. The `continuous` entry is
+> discharged by [ADR-0064](0064-continuous-solves.md); #106's remaining two groups
+> (`DatedCashflows`, `Currency::from_numeric`) stay open.
 
 ## Context
 

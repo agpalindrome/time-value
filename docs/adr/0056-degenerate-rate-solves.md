@@ -21,6 +21,16 @@
 > `annuity::rate_from_future` does. The reporting rule below is unchanged and is now
 > shared by both guards.
 
+> **Extended (2026-07-30) by [ADR-0064](0064-continuous-solves.md).** The rule below
+> is applied outside `annuity` for the first time: the continuous growth factor
+> `e^(δ·Y)` is `1` whenever its exponent is zero, so `continuous::rate` at `Y = 0`
+> and `continuous::years` at `δ = 0` are both of the unit-factor shape. The shared
+> helper moved to `root.rs` and took a parameter for the "satisfied" variant, because
+> the second of those leaves the **span** under-determined rather than the rate —
+> which is why `TvmError::IndeterminateSpan` now sits beside `IndeterminateRate`. The
+> satisfied/not-satisfied distinction, and `Residual::is_root` as the test of it, are
+> unchanged.
+
 ## Context
 
 `bracket_and_bisect` scans outward from `1 + r = 1e-4`, i.e. `r = −0.9999`, and

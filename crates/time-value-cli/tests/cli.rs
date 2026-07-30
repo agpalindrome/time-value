@@ -1509,3 +1509,235 @@ fn continuous_rejects_a_non_finite_force() {
         .failure()
         .stderr(predicate::str::contains("force of interest"));
 }
+
+// ---- The continuous solves (continuous rate / years): ADR-0064, #106 ------
+
+#[test]
+fn continuous_rate_solves_for_the_force_of_interest() {
+    // The inverse of `continuous fv` above: the force that takes 1000 to 1161.83
+    // over three years is 5%.
+    time_value()
+        .args([
+            "continuous",
+            "rate",
+            "--years",
+            "3",
+            "--present",
+            "1000",
+            "--future",
+            "1161.834242728283",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::starts_with("0.0499999999999999"));
+}
+
+#[test]
+fn continuous_years_solves_for_the_span() {
+    time_value()
+        .args([
+            "continuous",
+            "years",
+            "--rate",
+            "0.05",
+            "--present",
+            "1000",
+            "--future",
+            "1161.834242728283",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::starts_with("2.9999999999999"));
+}
+
+/// The span is signed (ADR-0036/0064): reaching a *smaller* amount at a positive
+/// force of interest is in the past, and the CLI prints a negative number rather
+/// than failing the way `single-sum nper` does on the same shape of input.
+#[test]
+fn continuous_years_prints_a_negative_span_for_a_discount() {
+    time_value()
+        .args([
+            "continuous",
+            "years",
+            "--rate",
+            "0.05",
+            "--present",
+            "1161.834242728283",
+            "--future",
+            "1000",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::starts_with("-2.9999999999999"));
+}
+
+/// A negative `--years` is accepted by the force solve and flips the sign of the
+/// answer — the flag takes `allow_hyphen_values`, so this also pins that it parses.
+#[test]
+fn continuous_rate_accepts_a_negative_span() {
+    time_value()
+        .args([
+            "continuous",
+            "rate",
+            "--years",
+            "-3",
+            "--present",
+            "1000",
+            "--future",
+            "1161.834242728283",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::starts_with("-0.0499999999999999"));
+}
+
+/// The solves are scalar, so they never echo a currency even though the amounts
+/// are denominated by the global flag (ADR-0057: the fold belongs to operations
+/// that *produce* a `Money`).
+#[test]
+fn the_continuous_solves_carry_no_currency() {
+    for leaf in ["rate", "years"] {
+        let (flag, value) = if leaf == "rate" {
+            ("--years", "3")
+        } else {
+            ("--rate", "0.05")
+        };
+        time_value()
+            .args([
+                "--currency",
+                "USD",
+                "continuous",
+                leaf,
+                flag,
+                value,
+                "--present",
+                "1000",
+                "--future",
+                "1161.834242728283",
+            ])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("USD").not());
+    }
+}
+
+/// A zero span leaves the force under-determined when the amounts agree, and
+/// unsolvable when they do not. The message interpolates the library error rather
+/// than restating it, because a static "no rate solves these inputs" would invert
+/// the first case (ADR-0052/0064).
+#[test]
+fn a_zero_span_reports_the_degeneracy_it_found() {
+    time_value()
+        .args([
+            "continuous",
+            "rate",
+            "--years",
+            "0",
+            "--present",
+            "1000",
+            "--future",
+            "1000",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "force of interest: every rate satisfies these inputs",
+        ));
+
+    time_value()
+        .args([
+            "continuous",
+            "rate",
+            "--years",
+            "0",
+            "--present",
+            "1000",
+            "--future",
+            "2000",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("no real solution"));
+}
+
+/// The mirror on the span solve — and the reason the two degeneracies do not share
+/// one variant: the message names the *span*, not a rate.
+#[test]
+fn a_zero_force_reports_the_span_degeneracy() {
+    time_value()
+        .args([
+            "continuous",
+            "years",
+            "--rate",
+            "0",
+            "--present",
+            "1000",
+            "--future",
+            "1000",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "span in years: every span satisfies these inputs",
+        ));
+
+    time_value()
+        .args([
+            "continuous",
+            "years",
+            "--rate",
+            "0",
+            "--present",
+            "1000",
+            "--future",
+            "2000",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("no real solution"));
+}
+
+/// Both solves reject the same out-of-domain amounts, with the same variant.
+#[test]
+fn the_continuous_solves_reject_amounts_outside_the_domain() {
+    for (leaf, flag, value) in [("rate", "--years", "3"), ("years", "--rate", "0.05")] {
+        for (present, future) in [("1000", "-500"), ("0", "1000"), ("1000", "0")] {
+            time_value()
+                .args([
+                    "continuous",
+                    leaf,
+                    flag,
+                    value,
+                    "--present",
+                    present,
+                    "--future",
+                    future,
+                ])
+                .assert()
+                .failure()
+                .stderr(predicate::str::contains("no real solution"));
+        }
+    }
+}
+
+/// `--json` wraps a solve in the uniform scalar shape, with no `currency` field
+/// (ADR-0039).
+#[test]
+fn the_continuous_solves_print_the_scalar_json_shape() {
+    time_value()
+        .args([
+            "--json",
+            "continuous",
+            "years",
+            "--rate",
+            "0.05",
+            "--present",
+            "1000",
+            "--future",
+            "1161.834242728283",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"value\""))
+        .stdout(predicate::str::contains("currency").not());
+}

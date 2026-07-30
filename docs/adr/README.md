@@ -54,12 +54,12 @@ the old one **Superseded** (link both ways) — don't rewrite the old one.
 | [0033](0033-core-domain-model-two-axes-and-an-f64-engine.md) | Core domain model — two axes, and an `f64` computation engine | Accepted |
 | [0034](0034-money-and-currency.md) | Money and currency — `f64` magnitude, a runtime ISO-4217 enum, and FX | Accepted (amended by 0053, 0057, 0058) |
 | [0035](0035-periodicity-tagged-time.md) | Periodicity-tagged time (`Period<P>`) | Accepted (amended by 0059) |
-| [0036](0036-continuous-compounding-force-of-interest.md) | Continuous compounding — a periodicity-free force of interest | Accepted |
+| [0036](0036-continuous-compounding-force-of-interest.md) | Continuous compounding — a periodicity-free force of interest | Accepted (amended by 0064 — the two solves) |
 | [0037](0037-currency-in-the-binaries.md) | Currency in the binaries — an opt-in code that is echoed, not rounded | Accepted |
 | [0038](0038-no-scheduled-release-continuous-development.md) | No scheduled release — continuous development | Accepted |
 | [0039](0039-typed-output-layer-for-the-binaries.md) | A typed output layer for the binaries — "types in, types out" | Accepted (MCP `CurrencyCode` workaround retired by 0044) |
 | [0040](0040-fx-convert-in-the-binaries.md) | FX convert in the binaries — a standalone `convert` surface | Accepted |
-| [0041](0041-continuous-compounding-in-the-binaries.md) | Continuous compounding in the binaries — a `continuous` family | Accepted |
+| [0041](0041-continuous-compounding-in-the-binaries.md) | Continuous compounding in the binaries — a `continuous` family | Accepted (extended by 0064 — the two solves) |
 | [0042](0042-serde-support.md) | `serde` support — an optional, validating wire format | Accepted (amends 0019; amended by 0060) |
 | [0043](0043-owned-cashflows.md) | Owned cashflows — `OwnedCashflows` behind an `alloc` feature | Accepted (amended by 0060) |
 | [0044](0044-schemars-support.md) | `schemars` support — JsonSchema companion to the serde wire format | Accepted (extended by 0060) |
@@ -74,7 +74,7 @@ the old one **Superseded** (link both ways) — don't rewrite the old one.
 | [0053](0053-fxrate-domain-and-currency-ordering.md) | `FxRate`'s domain is closed under reciprocal, `from` → `source`, and `Currency`'s ordering policy | Accepted (amends 0034) |
 | [0054](0054-numeric-robustness-of-the-core-operations.md) | Numeric robustness — schedule termination, rounding finiteness, cancellation-free annuity factors, and what counts as a root | Accepted (amends 0020, 0021, 0027) |
 | [0055](0055-publish-readiness-of-the-packaged-crate.md) | Publish readiness — what ships in the tarball, and a README that cannot rot | Accepted (amends 0006) |
-| [0056](0056-degenerate-rate-solves.md) | Degenerate rate solves report the degeneracy rather than the scan sentinel | Accepted (amends 0025, 0052; amended by 0063 — the table extended to the due and growing factors) |
+| [0056](0056-degenerate-rate-solves.md) | Degenerate rate solves report the degeneracy rather than the scan sentinel | Accepted (amends 0025, 0052; amended by 0063 — the table extended to the due and growing factors; extended by 0064 — `IndeterminateSpan`) |
 | [0057](0057-currency-is-checked-where-a-result-is-denominated.md) | Currency is checked where a result is denominated — the rate solves do not fold it | Accepted (amends 0034) |
 | [0058](0058-money-display-carries-its-currency.md) | `Money`'s `Display` carries its currency — bare for `XXX`, magnitude then ISO code otherwise | Accepted (amends 0034) |
 | [0059](0059-the-finite-scalars-are-totally-ordered.md) | The finite-by-construction scalars are totally ordered (`Eq` + `Ord`), `Money` stays partial | Accepted (amends 0035, extends 0005) |
@@ -82,3 +82,4 @@ the old one **Superseded** (link both ways) — don't rewrite the old one.
 | [0061](0061-money-and-currency-ergonomics.md) | `Money`/`Currency` ergonomics — `try_sum` not `Sum`, fallible `min`/`max`, infallible sign, lenient `FromStr` | Accepted (amends 0023, 0032; extends 0052) |
 | [0062](0062-annuity-sinking-fund-and-perpetuity-due.md) | The sinking-fund payment and the perpetuity-due | Accepted (amends 0015, 0025; extends 0028, 0049; extended by 0063) |
 | [0063](0063-annuity-due-solves-and-growing-inverses.md) | The annuity-due solves and the growing-annuity inverses | Accepted (amends 0015, 0025, 0048, 0056; extends 0028, 0049) |
+| [0064](0064-continuous-solves.md) | The continuous solves — force of interest and span (closed forms, a two-sided `ln1p`, and `IndeterminateSpan`) | Accepted (amends 0036, 0041; extends 0025, 0028, 0056) |

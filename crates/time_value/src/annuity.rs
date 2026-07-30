@@ -51,7 +51,7 @@
 //! ```
 
 use crate::math::{exp_m1, ln, ln_1p, powf};
-use crate::root::{abs, bracket_and_bisect, Residual};
+use crate::root::{abs, bracket_and_bisect, unit_factor_outcome, Residual};
 use crate::{
     FutureValue, Growth, Money, Payment, Period, Periodicity, PresentValue, Rate, TvmError,
 };
@@ -727,6 +727,7 @@ pub fn rate_from_future<P: Periodicity>(
         return Err(unit_factor_outcome(
             payment.money().value(),
             future.money().value(),
+            TvmError::IndeterminateRate,
         ));
     }
     solve_rate(
@@ -735,33 +736,6 @@ pub fn rate_from_future<P: Periodicity>(
         future.money().value(),
         future_value_factor,
     )
-}
-
-/// The error a rate solve owes its caller when its factor is identically `1` over
-/// the whole rate domain, so the equation collapses to `payment = target` with `r`
-/// absent (ADR-0056, ADR-0063).
-///
-/// Two rows of the constancy table are of this shape: the *future*-value factor at
-/// `n = 1` (the lone payment falls at the end of the term and never compounds) and
-/// the *due present*-value factor at `n = 1` (the lone payment falls today and is
-/// never discounted). Either every rate satisfies the equation or none does, and
-/// which it is turns on that comparison alone.
-///
-/// "Satisfied" is [`Residual::is_root`], the solver's own test, not `==`: a target a
-/// hair from the payment still leaves a residual inside the accepted tolerance at
-/// *every* rate, so an exact-equality guard would let those near-misses go on
-/// leaking the bracketing scan's `−0.9999` sentinel. Sharing this helper is what
-/// keeps the guards and the solver from disagreeing about what counts as solved.
-fn unit_factor_outcome(payment: f64, target: f64) -> TvmError {
-    let residual = Residual {
-        value: payment - target, // the factor is exactly 1, so this *is* the residual
-        scale: abs(payment) + abs(target),
-    };
-    if residual.is_root() {
-        TvmError::IndeterminateRate
-    } else {
-        TvmError::NoRealSolution
-    }
 }
 
 /// The level payment, made at the end of the first period and growing at `growth`
@@ -1007,8 +981,9 @@ fn solve_rate<P: Periodicity>(
 pub mod due {
     use super::{
         future_value_factor, growing_future_value_factor, growing_present_value_factor,
-        present_value_factor, solve_rate, unit_factor_outcome,
+        present_value_factor, solve_rate,
     };
+    use crate::root::unit_factor_outcome;
     use crate::{
         FutureValue, Growth, Money, Payment, Period, Periodicity, PresentValue, Rate, TvmError,
     };
@@ -1471,6 +1446,7 @@ pub mod due {
             return Err(unit_factor_outcome(
                 payment.money().value(),
                 present.money().value(),
+                TvmError::IndeterminateRate,
             ));
         }
         solve_rate(

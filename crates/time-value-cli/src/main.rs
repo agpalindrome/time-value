@@ -11,8 +11,9 @@
 //! form), `rate` (conversions
 //! between periodicities and nominal/effective quotes — the only family that
 //! takes a periodicity), `continuous` (continuous compounding at a force of
-//! interest — `fv`/`pv` over a real-number `years` span, plus the
-//! effective-annual bridge; ADR-0036/0041, #68), `amortize` (a schedule), and the
+//! interest — `fv`/`pv` over a real-number `years` span, the `rate`/`years` solves
+//! that read the same relation back, plus the effective-annual bridge;
+//! ADR-0036/0041/0064, #68), `amortize` (a schedule), and the
 //! standalone `convert` (foreign-exchange: restate an amount in another currency
 //! at a caller-supplied rate — ADR-0034/0037, #67). `--rate` is a per-period
 //! rate (annual for the dated `series xnpv`/`xirr`, a force of interest for
@@ -625,6 +626,32 @@ enum ContinuousCommand {
         /// The effective annual rate (e.g. 0.05 for 5% EAR).
         #[arg(long, allow_hyphen_values = true)]
         rate: f64,
+    },
+    /// Solve for the force of interest that grows a present to a future amount
+    /// over a span of years.
+    Rate {
+        /// The span in years (continuous; may be fractional or negative).
+        #[arg(long, allow_hyphen_values = true)]
+        years: f64,
+        /// The present amount.
+        #[arg(long, allow_hyphen_values = true)]
+        present: f64,
+        /// The future amount.
+        #[arg(long, allow_hyphen_values = true)]
+        future: f64,
+    },
+    /// Solve for the span in years over which a present amount grows to a future
+    /// one at a force of interest. The answer may be negative.
+    Years {
+        /// The force of interest δ.
+        #[arg(long, allow_hyphen_values = true)]
+        rate: f64,
+        /// The present amount.
+        #[arg(long, allow_hyphen_values = true)]
+        present: f64,
+        /// The future amount.
+        #[arg(long, allow_hyphen_values = true)]
+        future: f64,
     },
     /// The effective annual rate equivalent to a force of interest:
     /// `r = e^δ − 1`.
@@ -1375,8 +1402,16 @@ fn run_scalar(command: Command, currency: Currency) -> Result<ScalarOutput> {
     }
 }
 
-/// Dispatch the `continuous` subcommands (ADR-0036/0041, #68). `fv`/`pv` are
+/// Dispatch the `continuous` subcommands (ADR-0036/0041/0064, #68). `fv`/`pv` are
 /// monetary and honour the global `--currency`; the rate bridges are pure rates.
+///
+/// The two solves (`rate`, `years`) take both amounts, so they need no
+/// `--present`/`--future` *anchor* — that convention (ADR-0028 §2) exists where a
+/// solve can be posed from either end, and here neither end is optional. Their
+/// errors interpolate the library's message rather than restating it, for ADR-0052's
+/// reason: the degenerate outcomes are `IndeterminateRate`/`IndeterminateSpan`
+/// ("*every* value satisfies these inputs"), which a static "no rate solves these
+/// inputs" would invert.
 #[allow(clippy::needless_pass_by_value)]
 fn run_continuous(command: ContinuousCommand, currency: Currency) -> Result<ScalarOutput> {
     Ok(match command {
@@ -1396,6 +1431,32 @@ fn run_continuous(command: ContinuousCommand, currency: Currency) -> Result<Scal
             continuous::present_value(continuous_rate(r)?, years, money(future, currency)?)
                 .context("continuous present value is undefined for these inputs")?,
         ),
+        ContinuousCommand::Rate {
+            years,
+            present,
+            future,
+        } => {
+            let force = continuous::rate(
+                years,
+                PresentValue(money(present, currency)?),
+                FutureValue(money(future, currency)?),
+            )
+            .map_err(|e| anyhow!("force of interest: {e}"))?;
+            plain_out(force.value())
+        }
+        ContinuousCommand::Years {
+            rate: r,
+            present,
+            future,
+        } => {
+            let span = continuous::years(
+                continuous_rate(r)?,
+                PresentValue(money(present, currency)?),
+                FutureValue(money(future, currency)?),
+            )
+            .map_err(|e| anyhow!("span in years: {e}"))?;
+            plain_out(span)
+        }
         ContinuousCommand::FromEffective { rate: r } => {
             plain_out(ContinuousRate::from_effective_annual(annual_rate(r)?).value())
         }
