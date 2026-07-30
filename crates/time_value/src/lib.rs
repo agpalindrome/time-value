@@ -321,6 +321,26 @@ pub enum TvmError {
         /// The currency of the right-hand operand.
         right: Currency,
     },
+    /// A string parsed as a [`Currency`] — through `str::parse` /
+    /// [`FromStr`](core::str::FromStr) — was not an ISO 4217 alphabetic code. The parse accepts any casing of the three letters
+    /// and nothing else: no other length, no surrounding whitespace, no numeric
+    /// code (`docs/adr/0061-money-and-currency-ergonomics.md`).
+    ///
+    /// The offending string is deliberately *not* carried: a payload would need
+    /// either a lifetime or an owned `String`, and the core is `no_std` and
+    /// `alloc`-free by default (ADR-0052). A caller reporting the failure still has
+    /// the input it passed in.
+    ///
+    /// [`Currency::from_code`] is the same lookup as an `Option`, for a caller who
+    /// wants the strict, exactly-uppercase form.
+    ///
+    /// ```
+    /// use time_value::{Currency, TvmError};
+    ///
+    /// assert_eq!("usd".parse::<Currency>(), Ok(Currency::Usd));
+    /// assert_eq!("ZZZ".parse::<Currency>(), Err(TvmError::UnknownCurrencyCode));
+    /// ```
+    UnknownCurrencyCode,
     /// An exchange rate supplied to [`FxRate::new`](crate::FxRate::new) fell
     /// outside the accepted domain: it was not finite, was not strictly positive (a
     /// non-positive price has no economic meaning — ADR-0034), or lay in the
@@ -476,6 +496,7 @@ impl fmt::Display for TvmError {
             Self::CurrencyMismatch { left, right } => {
                 write!(f, "cannot combine {left} with {right}")
             }
+            Self::UnknownCurrencyCode => f.write_str("unknown ISO 4217 currency code"),
             Self::InvalidExchangeRate => f.write_str(
                 "exchange rate must be greater than zero and invertible (2.3e-308 to 4.5e307)",
             ),
