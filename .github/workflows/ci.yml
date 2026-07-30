@@ -34,9 +34,12 @@ jobs:
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@v21
 
-      - name: Nix store cache
-        uses: DeterminateSystems/magic-nix-cache-action@v13
-
+      # No Nix store cache: it was measured a net loss (ADR-0066). Saving it cost a
+      # mean 88.6s per run against a 26s benefit, and half the 10 GB budget sat in
+      # PR/merge-queue ref scopes that no later run can read, evicting the `main`
+      # scope that they *can* — so the cache kept causing its own misses. Every path
+      # CI needs is substituted from cache.nixos.org or static.rust-lang.org; nothing
+      # is built here, so removing it cannot turn a download into a compile.
       - name: Cargo registry & build cache
         uses: actions/cache@v4
         with:
