@@ -84,3 +84,4 @@ the old one **Superseded** (link both ways) — don't rewrite the old one.
 | [0063](0063-annuity-due-solves-and-growing-inverses.md) | The annuity-due solves and the growing-annuity inverses | Accepted (amends 0015, 0025, 0048, 0056; extends 0028, 0049) |
 | [0064](0064-continuous-solves.md) | The continuous solves — force of interest and span (closed forms, a two-sided `ln1p`, and `IndeterminateSpan`) | Accepted (amends 0036, 0041; extends 0025, 0028, 0056) |
 | [0065](0065-dated-counterparts.md) | The dated counterparts — a net future value at the horizon, a MIRR over the span in years, and an owned dated series | Accepted (amends 0026, 0029, 0043, 0060; extends 0028, 0056, 0057) |
+| [0066](0066-no-nix-store-cache-in-ci.md) | No Nix store cache in CI — it was a measured net loss | Accepted (amends 0012, 0055) |
