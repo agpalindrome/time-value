@@ -8,8 +8,8 @@
 //! ordinary and annuity-due), an amortization schedule conserves the principal it
 //! repays, currency rounding is idempotent, the dated XNPV agrees with the
 //! periodic NPV on whole-year offsets, `Money`'s arithmetic obeys the usual
-//! algebraic laws, and the finite scalars' ordering is the ordering of the value
-//! they wrap.
+//! algebraic laws, the finite scalars' ordering is the ordering of the value they
+//! wrap, and an owned cashflow series survives a `serde` round trip unchanged.
 //!
 //! `proptest` is a dev-dependency only, so it never reaches the published
 //! crate's dependency tree (the zero-dependency promise is about distribution,
@@ -1067,4 +1067,84 @@ fn a_currency_without_a_minor_unit_is_never_rounded() {
     // The set is non-empty — `Xxx` alone guarantees it — so a filter that silently
     // matched nothing would not pass as a vacuous success.
     assert!(checked > 0, "no minor-unit-free currency found");
+}
+
+/// The owned series' `serde` wire format (ADR-0060) round-trips *every* series, not
+/// just the worked examples in `tests/serde.rs`: any length (including empty), any
+/// finite amount, any currency. The imports are inside the module so no other
+/// feature configuration sees them.
+///
+/// **On exactness.** The format itself is lossless — `serde_json` writes the shortest
+/// decimal that identifies the `f64` uniquely — but recovering the bits exactly is
+/// the *deserializer's* job, and `serde_json`'s default float parser is best-effort
+/// (its `float_roundtrip` feature, off by default, is what makes it exact). So these
+/// properties assert recovery to within a few ULP rather than bit equality; the
+/// point tests in `tests/serde.rs`, whose amounts are exactly representable, pin the
+/// shape exactly. This caveat is not specific to the series — it applies to every
+/// `f64` the wire format carries (ADR-0060).
+#[cfg(all(feature = "serde", feature = "alloc"))]
+mod owned_cashflows_wire {
+    use super::close;
+    use proptest::prelude::*;
+    use time_value::{Currency, Money, Monthly, OwnedCashflows, Rate};
+
+    /// Relative closeness, for comparing an amount with its round-tripped self.
+    fn close_relative(a: f64, b: f64) -> bool {
+        let scale = if a < 0.0 { -a } else { a };
+        // A few ULP of the value's own magnitude (and an absolute floor at zero).
+        close(a, b, 8.0 * f64::EPSILON * scale + f64::MIN_POSITIVE)
+    }
+
+    proptest! {
+        /// Serializing a series and deserializing the result recovers it: the same
+        /// number of flows, in the same order, in the same currency, each amount
+        /// back to within the deserializer's float precision.
+        #[test]
+        fn serializing_then_deserializing_recovers_the_series(
+            amounts in prop::collection::vec(-1e12f64..1e12, 0..=32),
+            currency_index in 0usize..Currency::ALL.len(),
+        ) {
+            let currency = Currency::ALL[currency_index];
+            let series = OwnedCashflows::<Monthly>::new(
+                amounts.iter().map(|&a| Money::new(a, currency).unwrap()).collect(),
+            );
+
+            let document = serde_json::to_string(&series).unwrap();
+            let back: OwnedCashflows<Monthly> = serde_json::from_str(&document).unwrap();
+
+            prop_assert_eq!(back.len(), series.len());
+            for (recovered, original) in back.as_slice().iter().zip(series.as_slice()) {
+                prop_assert_eq!(recovered.currency(), original.currency());
+                prop_assert!(
+                    close_relative(recovered.value(), original.value()),
+                    "{} != {}",
+                    recovered.value(),
+                    original.value(),
+                );
+            }
+        }
+
+        /// Round-tripping preserves the *behaviour*, not just the data: the series
+        /// off the wire discounts to the same net present value.
+        #[test]
+        fn a_round_tripped_series_has_the_same_net_present_value(
+            amounts in prop::collection::vec(-1e6f64..1e6, 1..=16),
+            rate in 0.0f64..0.5,
+        ) {
+            let series = OwnedCashflows::<Monthly>::new(
+                amounts.iter().map(|&a| Money::agnostic(a).unwrap()).collect(),
+            );
+            let back: OwnedCashflows<Monthly> =
+                serde_json::from_str(&serde_json::to_string(&series).unwrap()).unwrap();
+
+            let rate = Rate::<Monthly>::new(rate).unwrap();
+            // Up to 16 discounted addends, each |·| ≤ 1e6, so this tolerance is far
+            // above the round-tripping error and far below any real difference.
+            prop_assert!(close(
+                back.net_present_value(rate).unwrap().value(),
+                series.net_present_value(rate).unwrap().value(),
+                1e-6,
+            ));
+        }
+    }
 }

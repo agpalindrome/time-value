@@ -74,6 +74,16 @@ jobs:
       - name: Clippy (no_std + alloc + libm)
         run: nix develop -c cargo clippy -p time_value --no-default-features --features alloc,libm --all-targets -- -D warnings
 
+      # The owned series' sequence wire form needs serde's own `alloc` feature,
+      # which the `alloc = ["serde?/alloc"]` weak dependency feature supplies
+      # (ADR-0060). No other configuration proves it, and this one only does so
+      # **without `--all-targets`**: any build that includes the test targets pulls
+      # the `serde_json` dev-dependency, which enables `serde/std` and hides a
+      # missing `serde/alloc` — as `--all-features` does too. Lib-only is exactly
+      # the dependency graph a downstream `features = ["alloc", "serde"]` user gets.
+      - name: Clippy (no_std + alloc + serde, lib only)
+        run: nix develop -c cargo clippy -p time_value --no-default-features --features alloc,serde -- -D warnings
+
       # The schemars (JsonSchema) impls must stay no_std-clean: --all-features pulls
       # in std, so check the pure no_std + schemars build explicitly (ADR-0044).
       - name: Clippy (no_std + schemars)

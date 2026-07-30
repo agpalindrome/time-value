@@ -13,6 +13,8 @@
 //!   server) advertise for a currency field.
 //! - **Composites** ([`Money`], [`FxRate`], [`DatedCashflow`], [`Installment`])
 //!   delegate to their `*Wire` struct's derived schema.
+//! - **[`OwnedCashflows`]** → an inlined `array` of [`Money`] (ADR-0060). The
+//!   `schemars` feature implies `alloc`, so the owned series always exists here.
 
 use alloc::borrow::Cow;
 use alloc::vec::Vec;
@@ -21,8 +23,10 @@ use schemars::{json_schema, JsonSchema, Schema, SchemaGenerator};
 
 #[cfg(any(feature = "std", feature = "libm"))]
 use crate::wire::DatedCashflowWire;
-use crate::wire::{FxRateWire, InstallmentWire, MoneyWire};
-use crate::{amortization::Installment, Currency, FxRate, Money, Periodicity, Rate};
+use crate::wire::{FxRateWire, InstallmentWire, MoneyWire, OwnedCashflowsWire};
+use crate::{
+    amortization::Installment, Currency, FxRate, Money, OwnedCashflows, Periodicity, Rate,
+};
 #[cfg(any(feature = "std", feature = "libm"))]
 use crate::{ContinuousRate, DatedCashflow, Period};
 
@@ -94,6 +98,27 @@ macro_rules! delegate_schema {
             }
         }
     };
+}
+
+// ---- OwnedCashflows: an array of Money, inlined ---------------------------
+
+impl<P: Periodicity> JsonSchema for OwnedCashflows<P> {
+    /// Inlined, like `schemars`' own sequence schemas — and for the same reason the
+    /// bare-number newtypes are: the periodicity tag is not on the wire (ADR-0060),
+    /// so a `$ref` to a definition named `OwnedCashflows` would imply a
+    /// per-periodicity schema that does not exist. `Money` remains the named
+    /// definition the `items` point at.
+    fn inline_schema() -> bool {
+        true
+    }
+
+    fn schema_name() -> Cow<'static, str> {
+        Cow::Borrowed("OwnedCashflows")
+    }
+
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        <OwnedCashflowsWire<'_> as JsonSchema>::json_schema(generator)
+    }
 }
 
 delegate_schema!(Money, MoneyWire, "Money");
