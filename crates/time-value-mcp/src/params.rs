@@ -215,7 +215,7 @@ pub(crate) struct AnnuityRateInput {
     pub currency: Option<Currency>,
 }
 
-/// Input for the `annuity_perpetuity` tool.
+/// Input for the `annuity_perpetuity` and `annuity_due_perpetuity` tools.
 #[derive(Debug, Deserialize, JsonSchema)]
 pub(crate) struct PerpetuityInput {
     /// Per-period rate (must exceed 0).
@@ -228,7 +228,8 @@ pub(crate) struct PerpetuityInput {
     pub currency: Option<Currency>,
 }
 
-/// Input for the `annuity_growing_perpetuity` tool.
+/// Input for the `annuity_growing_perpetuity` and `annuity_growing_due_perpetuity`
+/// tools.
 #[derive(Debug, Deserialize, JsonSchema)]
 pub(crate) struct GrowingPerpetuityInput {
     /// Per-period rate (must exceed the growth rate).
@@ -376,15 +377,25 @@ pub(crate) struct ConvertInput {
     pub rate: f64,
 }
 
-/// Input for the `annuity_payment` tool.
+/// Input for the `annuity_payment` and `annuity_due_payment` tools. Provide exactly
+/// one of `present` (amortise a balance) or `future` (accumulate to a target — the
+/// sinking-fund payment), the same anchored shape [`AnnuityPeriodsInput`] and
+/// [`AnnuityRateInput`] use (ADR-0062).
 #[derive(Debug, Deserialize, JsonSchema)]
 pub(crate) struct AnnuityPaymentInput {
     /// Per-period rate.
     pub rate: f64,
     /// Number of periods (may be fractional).
     pub periods: f64,
-    /// The present value to amortise into level payments.
-    pub present: f64,
+    /// Amortise this present value into level payments (mutually exclusive with
+    /// `future`).
+    #[serde(default)]
+    pub present: Option<f64>,
+    /// Accumulate to this future value — the sinking-fund payment, "how much must
+    /// be set aside each period to reach this target" (mutually exclusive with
+    /// `present`).
+    #[serde(default)]
+    pub future: Option<f64>,
     /// ISO 4217 currency to denominate the amounts in (e.g. `USD`, `JPY`).
     /// Omit for currency-agnostic (`XXX`) amounts. An unknown code is rejected.
     #[serde(default)]

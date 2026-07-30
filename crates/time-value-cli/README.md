@@ -40,15 +40,19 @@ time-value single-sum rate --periods 12 --present 1000 --future 1126.83  # 0.01
 # Annuities: ordinary, solves, perpetuities, growing, and annuity-due
 time-value annuity pv      --rate 0.01 --periods 12 --payment 100
 time-value annuity fv      --rate 0.01 --periods 12 --payment 100
-time-value annuity payment --rate 0.01 --periods 12 --present 1125.51
+time-value annuity payment --rate 0.01 --periods 12 --present 1125.51   # or --future
+time-value annuity payment --rate 0.01 --periods 12 --future 1268.25    # sinking fund: 100
 time-value annuity nper    --rate 0.01 --payment 100 --present 1125.51   # or --future
 time-value annuity rate    --periods 12 --payment 100 --present 1125.51  # or --future
 time-value annuity perpetuity         --rate 0.05 --payment 100          # 2000
 time-value annuity growing-perpetuity --rate 0.05 --growth 0.02 --payment 100
 time-value annuity due pv  --rate 0.01 --periods 12 --payment 100
-# Growing annuities (the rate need not exceed the growth); due-pv / due-fv for annuity-due
+time-value annuity due perpetuity --rate 0.05 --payment 100              # 2100 (× 1 + r)
+# Growing annuities (the rate need not exceed the growth); due-pv / due-fv / due-perpetuity
+# are the start-of-period forms
 time-value annuity growing pv --rate 0.05 --growth 0.02 --periods 12 --payment 100
 time-value annuity growing fv --rate 0.05 --growth 0.02 --periods 12 --payment 100
+time-value annuity growing due-perpetuity --rate 0.05 --growth 0.02 --payment 100  # 3500
 
 # Rate conversions (the one family that takes a periodicity)
 time-value rate ear         --rate 0.01 --periodicity monthly            # 0.126825…

@@ -50,7 +50,9 @@
 //! (present/future value and the solve-for `periods` / `rate` inverses, with the
 //! [`Period<P>`] type), the [`annuity`] module (ordinary, [annuity-due][annuity::due],
 //! [perpetuity][annuity::perpetuity], and [growing-perpetuity][annuity::growing_perpetuity]
-//! forms, plus the `periods` / `rate` solves), the modified internal rate of return
+//! forms — each perpetuity with a start-of-period counterpart in
+//! [`annuity::due`][annuity::due] — plus the `payment` / `periods` / `rate` solves,
+//! from a present or a future value), the modified internal rate of return
 //! ([`Cashflows::modified_internal_rate_of_return`]), the term-based
 //! [`amortization`] constructor, effective rate conversions between
 //! periodicities ([`Rate::convert`] / [`Rate::effective_annual`]),
@@ -181,13 +183,17 @@ macro_rules! docs_rs_links {
 [`single_sum::rate`]: https://docs.rs/time_value/latest/time_value/single_sum/fn.rate.html
 [`single_sum::periods`]: https://docs.rs/time_value/latest/time_value/single_sum/fn.periods.html
 [`annuity::payment`]: https://docs.rs/time_value/latest/time_value/annuity/fn.payment.html
+[`annuity::payment_from_future`]: https://docs.rs/time_value/latest/time_value/annuity/fn.payment_from_future.html
 [`annuity::due::payment`]: https://docs.rs/time_value/latest/time_value/annuity/due/fn.payment.html
+[`annuity::due::payment_from_future`]: https://docs.rs/time_value/latest/time_value/annuity/due/fn.payment_from_future.html
 [`annuity::periods`]: https://docs.rs/time_value/latest/time_value/annuity/fn.periods.html
 [`annuity::periods_from_future`]: https://docs.rs/time_value/latest/time_value/annuity/fn.periods_from_future.html
 [`annuity::rate`]: https://docs.rs/time_value/latest/time_value/annuity/fn.rate.html
 [`annuity::rate_from_future`]: https://docs.rs/time_value/latest/time_value/annuity/fn.rate_from_future.html
 [`annuity::perpetuity`]: https://docs.rs/time_value/latest/time_value/annuity/fn.perpetuity.html
 [`annuity::growing_perpetuity`]: https://docs.rs/time_value/latest/time_value/annuity/fn.growing_perpetuity.html
+[`annuity::due::perpetuity`]: https://docs.rs/time_value/latest/time_value/annuity/due/fn.perpetuity.html
+[`annuity::due::growing_perpetuity`]: https://docs.rs/time_value/latest/time_value/annuity/due/fn.growing_perpetuity.html
 [amortization::Schedule::for_term]: https://docs.rs/time_value/latest/time_value/amortization/struct.Schedule.html#method.for_term
 [`Cashflows::modified_internal_rate_of_return`]: https://docs.rs/time_value/latest/time_value/struct.Cashflows.html#method.modified_internal_rate_of_return
 [`ContinuousRate`]: https://docs.rs/time_value/latest/time_value/struct.ContinuousRate.html
@@ -370,7 +376,10 @@ pub enum TvmError {
     /// over, so the answer is not merely large but absent — the annuity factor is
     /// `0`, the `n`-th root has no `n`.
     ///
-    /// Returned by [`annuity::payment`], [`annuity::due::payment`],
+    /// Returned by [`annuity::payment`] and
+    /// [`annuity::payment_from_future`], their
+    /// [`annuity::due::payment`] /
+    /// [`annuity::due::payment_from_future`] counterparts,
     /// [`single_sum::rate`], [`Schedule::for_term`][amortization::Schedule::for_term],
     /// and [`Cashflows::modified_internal_rate_of_return`] on a single cashflow
     /// (ADR-0052). Distinct from [`NegativePeriods`](Self::NegativePeriods), which
@@ -473,8 +482,10 @@ pub enum TvmError {
     /// growth rate (`r <= g`; for a level perpetuity, `r <= 0`). The closed form
     /// `PMT / (r - g)` would return either an infinity (`r = g`) or a finite but
     /// economically meaningless value (`r < g`) for a series that does not
-    /// converge, so [`annuity::perpetuity`] / [`annuity::growing_perpetuity`]
-    /// reject it instead (ADR-0015).
+    /// converge, so [`annuity::perpetuity`] / [`annuity::growing_perpetuity`] — and
+    /// the start-of-period [`annuity::due::perpetuity`] /
+    /// [`annuity::due::growing_perpetuity`], which delegate to
+    /// them — reject it instead (ADR-0015, ADR-0062).
     #[cfg_attr(
         not(any(feature = "std", feature = "libm")),
         doc = docs_rs_links!()

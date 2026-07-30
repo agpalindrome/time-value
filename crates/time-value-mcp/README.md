@@ -16,12 +16,12 @@ the core library stays synchronous.
 | `xnpv`, `xirr` | net present value / internal rate of return of cashflows on irregular ISO dates, at an annual rate |
 | `single_sum_present_value`, `single_sum_future_value` | a single sum over a number of periods |
 | `single_sum_periods`, `single_sum_rate` | solve a single sum for periods (NPER) or rate (RATE) |
-| `annuity_present_value`, `annuity_future_value`, `annuity_payment` | ordinary (end-of-period) annuities |
-| `annuity_periods`, `annuity_rate` | solve an annuity for periods / rate, from a present or future value |
+| `annuity_present_value`, `annuity_future_value` | ordinary (end-of-period) annuities |
+| `annuity_payment`, `annuity_periods`, `annuity_rate` | solve an annuity for payment / periods / rate, from a present or future value (`annuity_payment` from a future value is the sinking-fund payment) |
 | `annuity_perpetuity`, `annuity_growing_perpetuity` | present value of a (growing) perpetuity |
 | `annuity_growing_present_value`, `annuity_growing_future_value` | finite growing annuity — a payment that grows each period (the rate need not exceed the growth) |
-| `annuity_due_present_value`, `annuity_due_future_value`, `annuity_due_payment` | annuity-due (start-of-period) |
-| `annuity_growing_due_present_value`, `annuity_growing_due_future_value` | finite growing annuity-due |
+| `annuity_due_present_value`, `annuity_due_future_value`, `annuity_due_payment`, `annuity_due_perpetuity` | annuity-due (start-of-period) |
+| `annuity_growing_due_present_value`, `annuity_growing_due_future_value`, `annuity_growing_due_perpetuity` | finite growing annuity-due, and the growing perpetuity-due |
 | `rate_effective_annual`, `rate_convert`, `rate_from_nominal`, `rate_nominal` | rate conversions (each takes a periodicity) |
 | `amortize` | an amortization schedule (array of rows) from a term or a level payment |
 

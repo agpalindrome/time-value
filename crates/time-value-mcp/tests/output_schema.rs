@@ -237,8 +237,9 @@ fn single_sum_output_conforms_to_declared_schema() {
     ]);
 }
 
-/// The annuity family: ordinary, the NPER/RATE solves, perpetuities, the
-/// annuity-due forms, and the finite growing forms (ADR-0048).
+/// The annuity family: ordinary, the PMT/NPER/RATE solves from either anchor,
+/// perpetuities (ordinary and due), the annuity-due forms, and the finite growing
+/// forms (ADR-0048, ADR-0062).
 #[test]
 fn annuity_output_conforms_to_declared_schema() {
     check_conformance(&[
@@ -253,6 +254,12 @@ fn annuity_output_conforms_to_declared_schema() {
         Case {
             tool: "annuity_payment",
             args: json!({"rate":0.01,"periods":12,"present":1000,"currency":"GBP"}),
+        },
+        // The same tool through its other anchor — the sinking-fund payment
+        // (ADR-0062) — since the anchor picks a different core call.
+        Case {
+            tool: "annuity_payment",
+            args: json!({"rate":0.01,"periods":12,"future":1268.250}),
         },
         Case {
             tool: "annuity_periods",
@@ -283,6 +290,14 @@ fn annuity_output_conforms_to_declared_schema() {
             args: json!({"rate":0.01,"periods":12,"present":1000}),
         },
         Case {
+            tool: "annuity_due_payment",
+            args: json!({"rate":0.01,"periods":12,"future":1280.933,"currency":"CHF"}),
+        },
+        Case {
+            tool: "annuity_due_perpetuity",
+            args: json!({"rate":0.05,"payment":100,"currency":"JPY"}),
+        },
+        Case {
             tool: "annuity_growing_present_value",
             args: json!({"rate":0.05,"growth":0.02,"periods":12,"payment":100,"currency":"EUR"}),
         },
@@ -297,6 +312,10 @@ fn annuity_output_conforms_to_declared_schema() {
         Case {
             tool: "annuity_growing_due_future_value",
             args: json!({"rate":0.05,"growth":0.02,"periods":12,"payment":100}),
+        },
+        Case {
+            tool: "annuity_growing_due_perpetuity",
+            args: json!({"rate":0.05,"growth":0.02,"payment":100}),
         },
     ]);
 }
