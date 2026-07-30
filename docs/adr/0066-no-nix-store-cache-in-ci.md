@@ -62,9 +62,22 @@ teardown, and which was previously exposed to eviction it survived only by luck.
 
 **The cargo cache (`actions/cache@v4`) stays.** It is measurably working.
 
-**`publish.yml` keeps its copy of the step, for now.** It is release machinery,
-triggered only by a version tag, and has never run; changing it is the owner's call
-and has no effect on the wall-clock this ADR is about.
+**`publish.yml` loses its copy too** (amended 2026-07-30, same decision, different
+reasoning). It was left in place initially as release machinery the owner should rule
+on. On inspection the case there is *stronger*, not weaker: `publish.yml` triggers on
+`refs/tags/time_value-v*`, and a tag ref is a one-off, so anything saved lands in a
+scope no later run can ever read — the save is waste by construction rather than a
+poor trade. Restoring would genuinely help, since the job runs `nix develop -c cargo
+publish`, but this action cannot restore without also saving, and once `ci.yml`
+stopped refreshing the `main` scope its 931 entries begin expiring on GitHub's 7-day
+unused-cache schedule, leaving nothing to restore from.
+
+The decisive cost is not the ~88 s — a once-per-release job is latency-insensitive.
+It is the ~1.4 GB written into the *shared* 10 GB budget, which is the budget the
+cargo cache lives in. A release would quietly re-create the eviction pressure this
+ADR removed, and the symptom — CI slowing because the cargo entry was evicted —
+would look unrelated to its cause. Removing it while the workflow is still dormant
+is cheaper than editing a workflow that actually fires.
 
 **The `ci` job id and the `merge_group` trigger are untouched**, as CLAUDE.md
 requires — this removes a step, not the job.
