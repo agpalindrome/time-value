@@ -1,81 +1,20 @@
 [package]
-name = "time_value"
-version = "1.0.0"
-edition.workspace = true
-# The core library keeps a conservative MSRV, below the workspace's 1.88
-# toolchain (which the MCP binary's deps force). CI verifies it on a real 1.85
-# toolchain — see docs/adr/0017-per-crate-msrv-core-1.85.md.
-rust-version = "1.85"
-license.workspace = true
-repository.workspace = true
-description = "Type-safe time-value-of-money calculations in Rust"
-homepage = "https://github.com/ojhermann-org/time-value"
-documentation = "https://docs.rs/time_value"
-readme = "README.md"
-keywords = ["finance", "tvm", "npv", "irr", "annuity"]
+name        = "time_value"
+description = "Type-safe time-value-of-money calculations"
+# Versioning is deferred: this is a rewrite, developed continuously, and cutting
+# a release is the owner's call. The published `0.1.0`–`0.8.0` series is a
+# separate, immutable history that this line does not continue.
+version    = "0.0.0"
+readme     = "README.md"
+keywords   = ["finance", "tvm", "interest", "present-value"]
 categories = ["finance", "mathematics", "no-std"]
 
-[package.metadata.docs.rs]
-# docs.rs builds with default features only, but the single-sum, annuity, and
-# rate-conversion APIs — and the intra-doc links pointing at them — live behind
-# `std`/`libm` (ADR-0009). Build the docs with all features so the full surface
-# is documented and those links resolve.
-all-features = true
-# Set `--cfg docsrs` so the `#[cfg_attr(docsrs, doc(cfg(...)))]` attributes take
-# effect and every feature-gated item carries an "Available on crate feature …"
-# badge. Without it an `all-features` build renders gated and ungated items
-# side by side with nothing to tell them apart (ADR-0055). `doc_cfg` is a
-# nightly rustdoc feature, which is why it is reached through `docsrs` — a
-# stable `cargo doc` never sets the cfg and is unaffected.
-rustdoc-args = ["--cfg", "docsrs"]
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+repository.workspace   = true
 
+# Load-bearing. Without it this crate gets *none* of the workspace lint
+# configuration and silently falls back to clippy's defaults.
 [lints]
 workspace = true
-
-[features]
-# The default core is `no_std` and dependency-free (ADR-0009).
-default = []
-# Pull in `std` (transcendental math, `std::error::Error` blanket impls where
-# cheaper than the `core` equivalents). Implies `alloc` — `std` is a superset.
-std = ["alloc"]
-# The `alloc` crate (no `std`), for the owned `OwnedCashflows` series that
-# complements the borrowed, allocation-free `Cashflows` (ADR-0043). Off by
-# default so the core stays allocation-free; enabling it (or `std`) adds the
-# owned collection without pulling in `std`.
-#
-# `serde?/alloc` is a *weak* dependency feature: it does not enable `serde`, but
-# when `serde` is also on it turns on serde's own `alloc` feature. The owned
-# series' wire form is a sequence (ADR-0060), and serde's `Vec`/`Cow` impls —
-# which that shape is built from — live behind serde's `alloc`. Without this a
-# downstream `features = ["alloc", "serde"]` build would fail to find them.
-alloc = ["serde?/alloc"]
-# `no_std` transcendental math (`powf`) via `libm`, so the single-sum and annuity
-# operations work without `std` (ADR-0009). The default build (NPV/NFV/IRR) is
-# arithmetic-only and needs neither `std` nor `libm`.
-libm = ["dep:libm"]
-# `Serialize`/`Deserialize` for the public value types, off by default so the
-# core stays dependency-free (ADR-0042). The dep is `no_std`-compatible
-# (`default-features = false`), so `serde` composes with the default `no_std`
-# build; deserialization routes through the fallible constructors, so an
-# out-of-domain value is rejected, not silently accepted.
-serde = ["dep:serde"]
-# `JsonSchema` for the public value types — the JSON-Schema companion to `serde`
-# (ADR-0044), off by default. Implies `alloc` (schemars builds its schemas with
-# `alloc`); the schema shapes track the `serde` wire format (ADR-0042). Composes
-# with a `no_std` build — the workspace dep drops schemars' own `std`.
-schemars = ["dep:schemars", "alloc"]
-
-[dependencies]
-libm = { workspace = true, optional = true }
-serde = { workspace = true, optional = true }
-schemars = { workspace = true, optional = true }
-
-[dev-dependencies]
-# Property-based tests (tests/properties.rs). Dev-only, so it never enters the
-# published crate's dependency tree — the zero-dependency promise is about what
-# a downstream user pulls in (ADR-0009), not the test harness.
-proptest = { workspace = true }
-# Exercises the `serde` feature's wire format (tests/serde.rs, gated on the
-# feature). Dev-only — `serde_json` is `std`, but the round-trip tests run under
-# `std` anyway; the shipped `serde` support itself stays `no_std`.
-serde_json = { workspace = true }

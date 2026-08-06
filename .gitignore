@@ -9,7 +9,3 @@ result-*
 
 # Claude Code internal state
 .claude/scheduled_tasks.lock
-
-# proptest failure-seed logs — transient developer-local artefacts, not tracked
-# regressions (the test's own strategy + tolerances encode the invariants).
-*.proptest-regressions

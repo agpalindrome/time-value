@@ -1,29 +1,28 @@
-# cargo-deny configuration (docs/adr/0012-ci-and-release-automation.md).
-#
-# The dependency tree is small and offline-only. The main things we assert are
-# license compatibility with our dual MIT-OR-Apache-2.0 license and no known
-# advisories. Run in CI as `nix develop -c cargo deny check`.
+[advisories]
+unmaintained = "workspace"
+ignore       = []
 
 [licenses]
-# Our own crates are `MIT OR Apache-2.0`; dependencies must carry a permissive
-# license compatible with redistributing under either.
+# Anticipatory: what is acceptable, not what is present. GPL/AGPL/SSPL/BUSL/ODbL
+# stay out by omission.
 allow = [
-    "MIT",
-    "Apache-2.0",
-    "Apache-2.0 WITH LLVM-exception",
-    "BSD-2-Clause",
-    "BSD-3-Clause",
-    "ISC",
+    "MIT", "Apache-2.0", "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause", "BSD-3-Clause", "ISC", "Zlib",
     "Unicode-3.0",
-    "Zlib",
-    "Unlicense",
+    "MPL-2.0",
 ]
-confidence-threshold = 0.9
-
-[advisories]
-version = 2
-yanked = "deny"
+confidence-threshold   = 0.8
+unused-allowed-license = "allow"
+private                = { ignore = true }
 
 [bans]
-# Flag (don't fail on) duplicate versions of a crate in the tree.
-multiple-versions = "warn"
+multiple-versions    = "warn"
+wildcards            = "deny"
+allow-wildcard-paths = true  # a path dep carries no version and reads as one
+deny                 = []
+
+# Without this table the check reports `sources ok` having done nothing.
+[sources]
+unknown-registry = "deny"
+unknown-git      = "deny"
+allow-registry   = ["https://github.com/rust-lang/crates.io-index"]
