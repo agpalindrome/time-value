@@ -33,30 +33,9 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
-      # The devshell exports RUSTFMT, so this resolves the pinned nightly. On
-      # stable the nightly-only options would be ignored and this would pass.
-      - name: Format
-        run: nix develop -c cargo fmt --all -- --check
-
-      # Prose wraps at 80; tables are exempt because markdown cannot wrap cells.
-      - name: Format (markdown)
-        run: nix develop -c prettier --check "**/*.md"
-
-      # No `-D warnings`: levels are set in Cargo.toml, so the CI verdict and the
-      # local verdict are the same.
-      - name: Clippy
-        run: nix develop -c cargo clippy --workspace --all-targets --locked
-
-      - name: Test
-        run: nix develop -c cargo nextest run --workspace --locked
-
-      # nextest does not run doc tests.
-      - name: Doctests
-        run: nix develop -c cargo test --doc --workspace --locked
-
-      # Without this every `[lints.rustdoc]` entry is inert.
-      - name: Docs
-        run: nix develop -c cargo doc -p time_value --no-deps --locked
-
-      - name: Deny
-        run: nix develop -c cargo deny check all
+      # Every check is defined in scripts/check.sh, which is also what a
+      # developer runs. One step rather than seven: the script runs them all and
+      # reports each, where CI stepwise would stop at the first failure and hide
+      # the rest until the next push.
+      - name: Check
+        run: nix develop -c ./scripts/check.sh
