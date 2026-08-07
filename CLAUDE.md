@@ -6,14 +6,50 @@
 crates.io as `time_value` (the GitHub repo is `time-value`, kebab-cased per the
 org ruleset).
 
-The repo was restarted from nothing. It currently holds **foundations only** —
-one empty crate, `crates/time_value`.
+The repo was restarted from nothing. It holds the Knowledge Bundle described
+below and one crate, `crates/time_value`, which is still empty.
+
+## The Knowledge Bundle comes first
+
+`knowledge/` is an
+[OKF](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md)
+bundle and the authoritative record of what this library knows and why. There
+are no ADRs. **Read `knowledge/index.md` before changing anything.**
+
+The order is concept, then code. A formula is modelled first — what the source
+says, what is derived from it, what is decided here, and what is left open — and
+the implementation follows the model. Code that contradicts a concept is wrong,
+or the concept is, and either way one of them changes deliberately.
+
+Two standing rules live there rather than here, so they are linkable and
+versioned with everything they govern:
+[illegal states are unrepresentable](knowledge/concepts/illegal-states-unrepresentable.md)
+and [the bundle is revisable](knowledge/concepts/the-bundle-is-revisable.md).
+
+### Writing a concept
+
+- **Mark where a claim comes from.** Sourced claims carry a footnote to a
+  `sources[]` id. Everything else is labelled **Decided** (a choice that could
+  have gone otherwise) or **Derived** (a consequence of something already
+  established). A reader must be able to tell which without guessing.
+- **Say when sources disagree**, which one was followed, and why. They do
+  disagree here — on the symbol for a simple rate, and on whether a period is
+  named.
+- **Correct in place, visibly.** A claim that changes says it changed and why
+  the earlier one failed. Do not silently rewrite; the reasoning is the
+  artifact.
+- **Bump `generated.at`** on every substantive edit. That is what makes a
+  verification visibly stale, so do not skip it to keep a concept looking fresh.
+- **Never write a `verified` entry yourself.** It asserts a human read and
+  confirmed the content. Ask.
+- **Run `okf-graph` after every change** — see Verification.
 
 ## Design principles
 
-- **Make TVM mistakes compile errors.** The bug this domain actually produces is
-  applying a rate of one periodicity to cashflows of another. Encode what the
-  compiler can check.
+- **Make TVM mistakes compile errors.** The bug this domain produces is applying
+  a rate of one periodicity to cashflows of another. Encode what the compiler
+  can check — and note this is currently narrowed, deliberately and with the
+  reason recorded, in [future value](knowledge/concepts/future-value.md).
 - **Earn each type.** Code lands in `f64` first, with tests capturing the stated
   behaviour; types follow. A type that catches no real failure mode does not
   belong — the pressure comes from the problem, never from a design decided in
@@ -36,12 +72,17 @@ scaffolding anything new. What is load-bearing here:
   nightly-only and stable ignores it silently — a `--check` that verifies almost
   nothing and exits 0.
 - **`rust-toolchain.toml` is the only toolchain pin**; the flake reads it.
+- **Markdown wraps at 80** via prettier, as a pre-commit hook and a CI step.
+  Tables are exempt: markdown cannot wrap a cell.
 - **Dependencies arrive when something needs them**, never in advance.
 
 ## Verification
 
+Everything CI runs, in the order CI runs it:
+
 ```sh
 nix develop -c cargo fmt --all -- --check
+nix develop -c prettier --check "**/*.md"
 nix develop -c cargo clippy --workspace --all-targets --locked
 nix develop -c cargo nextest run --workspace --locked --no-tests=pass
 nix develop -c cargo test --doc --workspace --locked
@@ -51,6 +92,16 @@ nix develop -c cargo deny check all
 
 Run all of them. Three are silent no-ops if skipped — `cargo test --doc`,
 `cargo doc`, and `cargo deny`.
+
+**And validate the bundle after touching `knowledge/`:**
+
+```sh
+nix run ~/okf-tools#okf-graph -- knowledge
+```
+
+That is **not** in CI and not in the devshell — it runs from a sibling repo's
+flake, so nothing stops a malformed bundle merging. Issue #136 tracks fixing
+that once `okf-graph` is a crate.
 
 `--no-tests=pass` is there only because the crate is empty. **Remove it with the
 first real test**; nextest failing on zero tests is the check working.
@@ -84,7 +135,9 @@ clicking. Per the global rules, that change is made by a
 
 Layered on the global floor in `~/.claude/CLAUDE.md`.
 
-- **Ask before deleting** `LICENSE-*`, `Cargo.lock`, or `rust-toolchain.toml`.
+- **Ask before deleting** anything under `knowledge/` — removing a concept
+  removes the reason for the code implementing it — or `LICENSE-*`,
+  `Cargo.lock`, or `rust-toolchain.toml`.
 - **Never rename** the published `time_value` crate.
 - **New crates** join under `crates/`, inherit `[workspace.package]`, and
   **must** carry `[lints] workspace = true`. Non-core crates start
