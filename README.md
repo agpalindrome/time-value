@@ -2,8 +2,7 @@
 
 Type-safe time-value-of-money calculations in Rust.
 
-A Cargo workspace whose published crate is [`time_value`](crates/time_value) —
-a `no_std`, zero-dependency core.
+A Cargo workspace whose published crate is [`time_value`](crates/time_value).
 
 ## Status
 
