@@ -1,0 +1,265 @@
+---
+type: Quantity
+title: Amount
+description: A quantity of money located at a point in time.
+tags: [money, quantity]
+status: draft
+generated: { by: claude/opus-5, at: 2026-08-07T02:34:52Z }
+sources:
+  - id: wikipedia-fv
+    resource: https://en.wikipedia.org/wiki/Future_value
+    title: Future value — Wikipedia
+    author: team:wikipedia-contributors
+    last_modified: 2026-08-04
+---
+
+# What it is
+
+A quantity of money located at a point in time.
+
+`PV` and `FV` in [future value](future-value.md) are the same kind of thing,
+differing only in where they sit. One Amount enters and one leaves.
+
+**Decided — the location is not carried by the Amount.** It is supplied by
+whatever operates on it. Were it intrinsic, `PV` and `FV` would be
+distinguishable as values and could not be one kind; keeping it extrinsic is
+precisely what lets a single Amount serve both roles.
+
+**Most of what follows is derived or decided here, not stated by the source.**
+The source gives the formula and nothing else — no domain, no arithmetic, no
+representation. Claims that do come from it carry a footnote; everything else is
+ours, and is open to revision on evidence.
+
+# The unit is forced, not chosen
+
+`FV` necessarily carries `PV`'s unit. This is not a convention: `(1 + rt)` is
+dimensionless,[^wikipedia-fv] so multiplying by it cannot change the dimension
+of what it multiplies. A formula that returned a different unit would be a
+different formula.
+
+What the unit _is_ — whether a currency is named, and whether that name is
+checked — is a separate question, answered next.
+
+# Both readings of "same unit" stay admissible
+
+**Decided — an Amount's unit may be a named, checked currency _or_ an assumption
+the caller honours, and nothing built here may foreclose either.** Both are
+legitimate. A model working throughout in one implied currency has nothing to
+check and should not pay for a check. One combining amounts drawn from different
+places needs exactly that check.
+
+Nothing forces the choice while a single Amount enters and a single Amount
+leaves, as it does in [future value](future-value.md). It becomes forced where
+two Amounts meet: addition, subtraction, comparison, and Amount ÷ Amount.
+
+**Derived — whatever represents an Amount keeps its magnitude private.** A
+private magnitude is what allows a currency to be added later without altering a
+single existing signature. Exposing it directly would forfeit that, and with it
+the flexibility above. This is a constraint on the implementation, not a
+preference.
+
+**Derived — when a currency is named, it is a value the Amount carries, not a
+tag in its type.** A currency is chosen while the program runs: parsed from an
+argument, read from a record, received over a wire. A type-level tag cannot
+express something unknown until run time, so it would serve hand-written models
+and fail every interface that accepts input.
+
+The _period_ shared by `r` and `t` will want the opposite answer for the
+opposite reason — a period is fixed when a model is written, which makes it a
+candidate for a type-level tag. The two questions look alike and are not.
+
+# Domain
+
+- **Always a definite quantity.** A representation's non-values are not Amounts.
+  In binary floating point that excludes NaN and the infinities, which propagate
+  silently through every subsequent operation, so a single one voids every claim
+  downstream of it without announcing itself. A decimal representation has no
+  such values, and satisfies the rule with nothing to exclude. "Must be finite"
+  is one representation's spelling of this rule, not the rule.
+- **May be negative.** An outflow, or a liability. The source does not forbid it
+  and the formula stays coherent under it; excluding it would be a policy
+  nothing here supports.
+- **May be zero.** It is the fixed point — `FV = 0` for any accumulation factor.
+- **Unbounded in the domain, bounded in any representation.** Nothing about
+  money caps its magnitude. This gap between the domain and its representation
+  is the entire source of the partiality below.
+
+# Arithmetic
+
+What makes sense, given two Amounts of the same unit and a dimensionless number:
+
+| operation              | result        | note                                                          |
+| ---------------------- | ------------- | ------------------------------------------------------------- |
+| Amount + Amount        | Amount        |                                                               |
+| Amount − Amount        | Amount        | `FV − PV` is the interest earned, itself an Amount            |
+| Amount × dimensionless | Amount        | the only operation [future value](future-value.md) requires   |
+| Amount ÷ dimensionless | Amount        |                                                               |
+| Amount ÷ Amount        | dimensionless | the route to inverting for `r` or `t`, since `FV/PV = 1 + rt` |
+| Amount vs Amount       | ordering      |                                                               |
+
+What does not make sense:
+
+- **Amount × Amount.** Money squared has no referent. An Amount is therefore not
+  a number that happens to be labelled; it is arithmetically a different kind of
+  thing.
+- **Amount + dimensionless.** No referent either. It is why the `1 +` sits
+  _inside_ the parentheses: the formula adds a dimensionless number to a
+  dimensionless number, then multiplies.
+- **Amounts of different units**, without an explicit conversion.
+
+# Every Amount-returning operation is partial
+
+Because the domain is unbounded and any representation is not, each operation
+above that yields an Amount can leave the domain. Amount ÷ Amount is separately
+partial at a zero divisor.
+
+This is a property of the domain meeting a representation, not of the
+mathematics. It is stated here so that whatever represents an Amount cannot
+quietly pretend the operations are total.
+
+**Derived — the required operations are stated as _checked_, not in terms of
+finiteness.** The two representations fail differently: binary floating point
+produces NaN or an infinity, a decimal one overflows. Phrasing the requirement
+as "is finite" describes only the first. Phrasing it as arithmetic that can
+report failure describes both, and is the only phrasing under which a single set
+of requirements covers more than one representation.
+
+# Excluding non-values earns a total order
+
+Amounts are totally ordered. This is a second, independent reason for the rule
+above: NaN is unordered against everything, itself included, so admitting it
+would cost comparison and not merely arithmetic. A representation without
+non-values is totally ordered already.
+
+# Equality
+
+**Decided — equality is exact, and inherited from the representation.** Two
+Amounts are equal when their representations hold the same value.
+
+This is deliberately **not** the claim that they are the same amount of money.
+Two amounts reached by mathematically identical routes can differ in the last
+bits — `PV(1 + rt)` against `PV + PV·rt` is exactly such a pair — and this
+equality calls them different. Nothing weaker is available without giving up
+more than it buys.
+
+**Derived — barring non-values makes equality reflexive, and so total.** NaN is
+the only binary floating-point value unequal to itself. Having excluded it, an
+Amount carries full equality and a total order rather than the partial forms
+floating point normally forces, which is what makes sorting, deduplication and
+use as a key available at all.
+
+**Derived — the order must be the one that agrees with equality.** The obvious
+tool for totally ordering binary floats places negative zero below zero, while
+equality calls them the same. An order that disagrees with equality is a broken
+contract, and it fails quietly — in lookups and sorts, far from the call that
+caused it. Negative zero and zero are the same sum of money, and the order must
+say so.
+
+**Decided — approximate comparison exists, is named, and is never the
+equality.** Comparison within a tolerance is not transitive, so it is not an
+equivalence relation and cannot serve as equality without breaking every
+structure that assumes one. It is a separate operation, asked for explicitly.
+
+This is what a test comparing a computed Amount against an expected one wants.
+Equality is the wrong instrument there, and reaching for it is the common error.
+
+# The representation is a parameter
+
+**Decided — which numeric representation carries an Amount is the caller's
+choice, not this library's.** Binary floating point is fast, ubiquitous, and
+wrong for settlement; a decimal representation is right for money and slower.
+Neither is correct for every use, so the library states the operations it
+requires and lets the caller supply something providing them.
+
+**Derived — the required operations differ between formulas, and that is
+acceptable.** Simple interest needs addition and multiplication. Compound
+interest needs `(1 + i)^n`, which for a non-integer `n` is a transcendental
+operation that most decimal representations do not offer. So the requirements
+are not one set but several, and a representation may satisfy the requirements
+of one formula and not another. This is a true statement about the
+representations rather than a defect: a tool that claimed to compute compound
+interest exactly in a representation that cannot do so would be worse than one
+that declines.
+
+**Derived — a representation choice does not decide the
+[known and unaddressed](#known-and-unaddressed) items below.** Selecting a
+decimal representation removes binary rounding error; it does not supply a
+rounding rule the formula never had.
+
+**Decided — the first concrete representation is a 64-bit binary float.** It is
+ubiquitous, needs no dependency, and supplies every operation any formula here
+will want, including the transcendental ones compound interest needs. It is also
+the wrong representation for settlement, which is the whole reason the choice is
+a parameter rather than a fixture.
+
+Several claims in this Concept are specific to that choice and would need
+restating under another: that non-values are NaN and the infinities, that
+excluding NaN is what earns reflexive equality, and that negative zero must
+compare equal to zero.
+
+**Decided — the parameter is not built until something needs it.** One concrete
+representation ships first. Made a parameter later with a default, the plain
+name goes on meaning what it means today, so deferring costs almost nothing
+while adopting early taxes every signature, every error message and every page
+of documentation. The caveat is that the change is near-, not perfectly,
+non-breaking: it can disturb inference and any implementation a caller wrote
+against the concrete type. With no callers, that is free; it will not stay free.
+
+# What the library exposes
+
+**Decided — the library implements a subset of the algebra above, and grows it
+when a formula requires it.** [Future value](future-value.md) needs Amount ×
+dimensionless and nothing else. The rest are true of Amounts and unimplemented,
+and writing them down here is what makes their absence a choice rather than an
+oversight.
+
+This is the asymmetry between a Concept and its implementation. The Concept
+states what is true; the implementation states what has been earned.
+
+**Derived — the operations are named methods that can fail, not arithmetic
+operators.** An operator must return a value, and the honest return here is one
+that can report failure. Overloading it would either lie about totality or yield
+a result that no longer composes with a second operator, so the operator earns
+nothing a named method does not.
+
+# How this Concept satisfies the standing rule
+
+[Illegal states are unrepresentable](illegal-states-unrepresentable.md) applies
+here, at rung 2 of its ladder: a representation's non-values exist and cannot be
+removed by any type discipline, so **an Amount holding one must not be
+constructible.** Construction validates and can fail, and no path skips it.
+
+This gives the private magnitude required in
+[both readings](#both-readings-of-same-unit-stay-admissible) a second job.
+Privacy is not only what keeps a currency addable later; it is the sole
+mechanism by which any invariant here is enforceable. An exposed magnitude can
+be written to directly, and every guarantee becomes a comment.
+
+Because the operations above are partial, they too return something that can
+fail — the rule propagates past the constructor rather than stopping at it.
+
+# Known and unaddressed
+
+- **Binary representation, decimal money.** A representation in binary floating
+  point cannot hold `0.1` exactly, so amounts carry representation error that
+  accumulates through arithmetic.
+- **The formula carries no rounding rule.** `PV(1 + rt)` is a real number.
+  Rounding to a minor unit is a settlement concern that sits outside the
+  formula, and nothing here decides it.
+
+Both are recorded as known rather than solved. Choosing a representation does
+not decide them.
+
+# Not decided
+
+- What an _absent_ currency means when it meets a named one: unknown, and so
+  adopting it, or explicitly unitless, and so rejecting it. These differ, and
+  choosing wrongly fails silently. Deferred until two Amounts meet.
+- What tolerance the approximate comparison uses — absolute, relative, or
+  measured in representable steps. Each is right for a different range, and the
+  answer depends on the representation and on what the tests actually need.
+  Deferred until there is something to compare.
+- How an Amount renders. Tied to the absent rounding rule above: a rendering
+  that shows two decimal places has chosen one, whether or not it says so.
+
+[^wikipedia-fv]: _Future value_, Wikipedia, revision last modified 2026-08-04.
