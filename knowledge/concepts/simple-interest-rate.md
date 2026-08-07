@@ -3,7 +3,8 @@ type: Quantity
 title: Simple interest rate
 description: The rate per time period at which simple interest accrues.
 tags: [simple-interest, rate]
-status: draft
+status: stable
+verified: { by: human:ojhermann, at: 2026-08-07T16:20:15Z }
 generated: { by: claude/opus-5, at: 2026-08-07T16:02:06Z }
 sources:
   - id: wikipedia-fv

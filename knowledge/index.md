@@ -24,3 +24,6 @@ claim came from. It grows one concept at a time.
 - [Illegal states are unrepresentable](concepts/illegal-states-unrepresentable.md) -
   A value that would be invalid should be impossible to construct, not merely
   detectable afterwards.
+- [The bundle is revisable](concepts/the-bundle-is-revisable.md) - Content,
+  structure and decomposition all change as understanding improves; none of it
+  is settled by having been written.

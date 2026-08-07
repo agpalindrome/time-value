@@ -5,8 +5,9 @@ description:
   The dimensionless multiplier by which simple interest grows an amount over a
   span.
 tags: [simple-interest, accumulation]
-status: draft
-generated: { by: claude/opus-5, at: 2026-08-07T16:15:56Z }
+status: stable
+verified: { by: human:ojhermann, at: 2026-08-07T16:20:15Z }
+generated: { by: claude/opus-5, at: 2026-08-07T16:20:15Z }
 sources:
   - id: wikipedia-accum
     resource: https://en.wikipedia.org/wiki/Accumulation_function
@@ -34,6 +35,10 @@ contains no "factor"; the parenthesised expression is introduced as a thing in
 its own right because the domain does name it — as an accumulation function —
 and because it is where an invariant can be enforced once. That is a choice made
 here, not something the formula hands over.
+
+Whether it is the right cut becomes answerable when `(1 + i)^n` appears beside
+it, and not before — see
+[the bundle is revisable](the-bundle-is-revisable.md#decompositions-are-guesses-until-a-second-instance-exists).
 
 # Why it exists as a thing rather than an expression
 

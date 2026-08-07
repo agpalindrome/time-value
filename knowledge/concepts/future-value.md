@@ -5,7 +5,9 @@ description:
   The value at a future date of a single present amount earning simple interest.
 tags: [simple-interest]
 status: stable
-verified: { by: human:ojhermann, at: 2026-08-07T02:37:35Z }
+verified:
+  - { by: human:ojhermann, at: 2026-08-07T02:37:35Z }
+  - { by: human:ojhermann, at: 2026-08-07T16:20:15Z }
 generated: { by: claude/opus-5, at: 2026-08-07T16:15:56Z }
 sources:
   - id: wikipedia-fv

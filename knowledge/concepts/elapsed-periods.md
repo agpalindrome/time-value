@@ -3,7 +3,8 @@ type: Quantity
 title: Elapsed periods
 description: A length of time counted in the periods a rate is stated against.
 tags: [simple-interest, time]
-status: draft
+status: stable
+verified: { by: human:ojhermann, at: 2026-08-07T16:20:15Z }
 generated: { by: claude/opus-5, at: 2026-08-07T16:09:41Z }
 sources:
   - id: wikipedia-fv
