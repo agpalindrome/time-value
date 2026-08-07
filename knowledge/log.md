@@ -3,6 +3,13 @@
 ## 2026-08-07
 
 - **Update**: Recorded in
+  [a claim earns a test](principles/a-claim-earns-a-test.md) that a confirmation
+  done once, by hand, expires the moment the code changes — a check is believed
+  while it is watched failing, not because it once was. The bundle's invariants
+  now carry fixture bundles that re-run the red side, and the gap was
+  demonstrated before it was closed: deleting one invariant's report left every
+  assertion against the real bundle green.
+- **Update**: Recorded in
   [a claim earns a test](principles/a-claim-earns-a-test.md) that a completeness
   claim — "the only X", "all the Y", "that cannot happen" — is an assertion like
   any other and is the one least likely to be tested, since it is about an

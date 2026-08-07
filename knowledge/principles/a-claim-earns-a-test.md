@@ -10,7 +10,8 @@ verified:
   - { by: human:ojhermann, at: 2026-08-07T21:29:40Z }
   - { by: human:ojhermann, at: 2026-08-07T22:22:09Z }
   - { by: human:ojhermann, at: 2026-08-07T22:46:43Z }
-generated: { by: claude/opus-5, at: 2026-08-07T22:43:29Z }
+  - { by: human:ojhermann, at: 2026-08-07T23:11:08Z }
+generated: { by: claude/opus-5, at: 2026-08-07T23:07:27Z }
 ---
 
 # The rule
@@ -92,6 +93,19 @@ check to fail, because the reader cannot tell.
 those misreads was a shell pipeline interrogating YAML. The invariants they were
 groping at are now a test that parses the frontmatter, and each one was
 confirmed to fail against a deliberately broken bundle before being trusted.
+
+**Derived — a confirmation done once, by hand, expires the moment the code
+changes.** That first confirmation was real and it was weak evidence: it
+established that each invariant could fail on the day it was written, against a
+bundle broken on purpose and then deleted. Nothing carried it forward. Each
+invariant now has a fixture bundle breaking exactly one of them, so the red side
+is re-run rather than remembered — and the gap was demonstrated before it was
+closed, by deleting one invariant's report and watching every assertion against
+the real bundle stay green while only the fixtures noticed.
+
+The general form: **a check is believed while it is watched failing, not because
+it once was.** Whatever proved a check can go red belongs in the suite beside
+it, or the proof decays into a claim about the past.
 
 # A completeness claim is a claim, and nothing pins it
 
