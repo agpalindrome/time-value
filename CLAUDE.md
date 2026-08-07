@@ -6,8 +6,8 @@
 crates.io as `time_value` (the GitHub repo is `time-value`, kebab-cased per the
 org ruleset).
 
-The repo was restarted from nothing. It holds the Knowledge Bundle described
-below and one crate, `crates/time_value`, which is still empty.
+One crate, `crates/time_value`, built against the Knowledge Bundle described
+below.
 
 ## The Knowledge Bundle comes first
 
@@ -37,10 +37,10 @@ the one that pays:
 See
 [code and bundle change together](knowledge/principles/code-and-bundle-change-together.md).
 
-Two standing rules live there rather than here, so they are linkable and
+The standing rules live there rather than here, so they are linkable and
 versioned with everything they govern:
-[illegal states are unrepresentable](knowledge/principles/illegal-states-unrepresentable.md)
-and [the bundle is revisable](knowledge/principles/the-bundle-is-revisable.md).
+[`knowledge/principles/`](knowledge/principles/). They are not listed here — a
+list in two places is a list that goes stale in one of them.
 
 ### Writing a concept
 
@@ -162,3 +162,13 @@ Layered on the global floor in `~/.claude/CLAUDE.md`.
   Commits are Conventional Commits.
 - Comments supplement the code and the structure — they earn their place by
   naming a trap, not by restating the line below them.
+- **Documentation states what is durable, not what is currently true.** A
+  "Status" section, a count, or a list of what is implemented so far is correct
+  on the day it is written and wrong soon after, and keeping it right is work
+  nobody remembers to do. Progress belongs in `knowledge/log.md` and in git,
+  which record it without being asked. The exception is a state claim that
+  carries its own resolution — "not gated; tracked in #136" tells a reader both
+  the fact and where it stops being true.
+- **Do not enumerate a growing set in two places.** Naming the standing rules in
+  both `CLAUDE.md` and the bundle guaranteed one of them would fall behind, and
+  it did. Link to the index instead.
