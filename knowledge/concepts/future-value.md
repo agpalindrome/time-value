@@ -6,7 +6,7 @@ description:
 tags: [simple-interest]
 status: stable
 verified: { by: human:ojhermann, at: 2026-08-07T02:37:35Z }
-generated: { by: claude/opus-5, at: 2026-08-07T16:02:06Z }
+generated: { by: claude/opus-5, at: 2026-08-07T16:09:41Z }
 sources:
   - id: wikipedia-fv
     resource: https://en.wikipedia.org/wiki/Future_value
@@ -148,10 +148,13 @@ on domain grounds as well as on representation grounds.
 
 `FV` is a function of `PV`, `r`, and `t`.
 
-`PV` and `FV` are both [Amounts](amount.md). `r` is a
-[simple interest rate](simple-interest-rate.md).
+`PV` and `FV` are both [Amounts](amount.md), `r` is a
+[simple interest rate](simple-interest-rate.md), and `t` is a count of
+[elapsed periods](elapsed-periods.md).
 
-How `t` is represented is not decided.
+Every quantity in the formula now has a concept. What remains is the shape of
+the operation itself — how it is called, and how it reports the two ways it can
+fail.
 
 [^wikipedia-fv]: _Future value_, Wikipedia, revision last modified 2026-08-04.
 
