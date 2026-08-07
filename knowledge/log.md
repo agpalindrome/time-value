@@ -2,6 +2,14 @@
 
 ## 2026-08-07
 
+- **Update**: Recorded in
+  [a claim earns a test](principles/a-claim-earns-a-test.md) that a completeness
+  claim — "the only X", "all the Y", "that cannot happen" — is an assertion like
+  any other and is the one least likely to be tested, since it is about an
+  absence. Two were falsified in a single review: `check.sh` was not the only
+  definition of what must pass, and the float_cmp guarantee was not
+  unconditional. A claim of a complete list is checked by deriving the list; a
+  claim of an unreachable state, by trying to reach it.
 - **Update**: Corrected [amount](domain/amount.md) and
   [a claim earns a test](principles/a-claim-earns-a-test.md) — both stated that
   clippy's `float_cmp` makes `assert_eq!` on two computed floats unreachable in

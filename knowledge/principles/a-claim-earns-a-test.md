@@ -9,7 +9,8 @@ status: stable
 verified:
   - { by: human:ojhermann, at: 2026-08-07T21:29:40Z }
   - { by: human:ojhermann, at: 2026-08-07T22:22:09Z }
-generated: { by: claude/opus-5, at: 2026-08-07T22:06:40Z }
+  - { by: human:ojhermann, at: 2026-08-07T22:46:43Z }
+generated: { by: claude/opus-5, at: 2026-08-07T22:43:29Z }
 ---
 
 # The rule
@@ -91,6 +92,39 @@ check to fail, because the reader cannot tell.
 those misreads was a shell pipeline interrogating YAML. The invariants they were
 groping at are now a test that parses the frontmatter, and each one was
 confirmed to fail against a deliberately broken bundle before being trusted.
+
+# A completeness claim is a claim, and nothing pins it
+
+**Decided — "this is the only X", "these are all the Y", "that cannot happen
+here" are assertions like any other, and they are load-bearing precisely because
+a reader who believes one stops looking.** They are also the assertions least
+likely to be tested, because there is nothing concrete to point a test at: the
+claim is about an absence.
+
+Two were found in a single review, both stated confidently and both false:
+
+- **"`scripts/check.sh` is the only definition of what must pass."** There were
+  two. Seven pre-commit hooks in `flake.nix` appeared nowhere in the script, and
+  two of those were content checks that a clone without hooks armed skipped in
+  silence. The sentence was in the same paragraph that warns against keeping a
+  list in two places.
+- **"A test suite here cannot reach for equality even by accident."** It can,
+  whenever the test is named after what it tests — see
+  [Amount](../domain/amount.md#equality). The lint had been watched going red;
+  it had never been watched in the shape being relied on.
+
+**Derived — the two failure modes are enumeration and exhaustiveness, and they
+want different answers.** A claim that a list is complete is checked by deriving
+the list rather than writing it down twice — `git ls-files '*.nix'` instead of
+naming `flake.nix`. A claim that some state is unreachable is checked by trying
+to reach it, which is [prove the check can fail](#prove-the-check-can-fail)
+again: construct the case the claim says cannot exist and watch what happens.
+
+**Derived — a completeness claim should say what it was checked against.** Both
+above would have survived as true statements with a scope on them: the only
+definition _of what CI enforces_; unreachable _for any test not named `eq`_. The
+scope is what a later reader needs in order to notice that the world has moved,
+and it costs a clause.
 
 # What a test may not stand in for
 
