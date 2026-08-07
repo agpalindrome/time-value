@@ -9,6 +9,7 @@ verified:
   - { by: human:ojhermann, at: 2026-08-07T15:13:35Z }
   - { by: human:ojhermann, at: 2026-08-07T15:40:47Z }
   - { by: human:ojhermann, at: 2026-08-07T18:50:30Z }
+  - { by: human:ojhermann, at: 2026-08-07T19:07:03Z }
 generated: { by: claude/opus-5, at: 2026-08-07T19:00:08Z }
 sources:
   - id: wikipedia-fv
