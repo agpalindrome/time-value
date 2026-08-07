@@ -60,9 +60,25 @@ first real test**; nextest failing on zero tests is the check working.
 CI runs on pushes to `main` and on pull requests. It is **not** a required status
 check — that gate was removed deliberately.
 
+Merging to `main` requires a pull request, with zero required approvals (GitHub
+forbids self-approval, so any higher count would block a sole maintainer) and an
+`OrganizationAdmin` bypass for deliberate direct pushes.
+
 **There is no release and none scheduled.** Bumping a version, flipping
 `publish`, tagging, or adding release machinery is the owner's call and is never
 inferred from the work looking finished.
+
+## Repo settings as code
+
+This repo's own rulesets live in `.github/rulesets/` and are reconciled by
+`scripts/settings.sh --check` / `--apply` — owner-run, deliberately not in CI, so
+settings never change silently. Org-wide rules come from `~/github-settings` and
+are invisible to that script; the layers compose and GitHub enforces the more
+restrictive.
+
+Change a repo-level GitHub setting by editing the JSON and applying it, never by
+clicking. Per the global rules, that change is made by a
+`~/github-settings`-seated session, not from here.
 
 ## Deletion & creation
 
