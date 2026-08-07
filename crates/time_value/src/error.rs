@@ -111,6 +111,13 @@ pub enum Error {
         tolerance: f64,
     },
 
+    /// A ratio was asked for with a zero divisor.
+    ///
+    /// A domain failure. The ratio of an amount to nothing is undefined rather
+    /// than large, so no wider representation answers it.
+    #[non_exhaustive]
+    ZeroDivisor,
+
     /// A span of elapsed periods is negative.
     ///
     /// A domain failure. Running the formula backwards does not discount — the
@@ -147,6 +154,7 @@ impl fmt::Display for Error {
             ),
             Self::NotFinite { quantity } => write!(f, "{quantity} is not finite"),
             Self::Underflow => f.write_str("a non-zero amount shrank to zero"),
+            Self::ZeroDivisor => f.write_str("ratio has a zero divisor"),
             Self::NegativeTolerance { tolerance } => {
                 write!(f, "tolerance `{tolerance}` is negative")
             }

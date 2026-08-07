@@ -2,6 +2,12 @@
 
 ## 2026-08-07
 
+- **Update**: Decided in [amount](domain/amount.md) that the read accessor
+  stays, is a deliberate hole, and is renamed when a currency lands — at which
+  point its name is the only warning left. Recorded the derived reading that
+  reaching through the hatch is evidence an operation is missing rather than
+  that the hatch is acceptable, which is what put Amount ÷ Amount into the
+  library.
 - **Restructure**: Split the flat `concepts/` directory into
   [principles](principles/) and [domain](domain/), each with its own index, and
   gave the root index a routing table. §8's stated purpose for index files is

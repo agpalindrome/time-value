@@ -307,7 +307,7 @@ mod tests {
     fn dividing_recovers_the_factor() {
         let (present, r, t) = (amount(250.0), rate(0.04), periods(2.5));
         let future = future_value(present, r, t).expect("valid");
-        let recovered = future.magnitude() / present.magnitude();
+        let recovered = future.ratio_to(present).expect("present is not zero");
         let direct = SimpleAccumulationFactor::new(r, t).expect("valid");
         assert!((recovered - direct.value()).abs() < 1e-12);
     }

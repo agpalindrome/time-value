@@ -77,14 +77,66 @@ impl Amount {
 
     /// The magnitude, as a number.
     ///
-    /// An escape hatch, and the only one. Operations this crate has not yet
-    /// earned — adding two Amounts, dividing one by another — are reachable
-    /// through it, and nothing here stops that. What it costs is that once an
-    /// Amount records a currency, this returns a partial view of the value
-    /// while every existing call site goes on compiling.
+    /// The escape hatch. A value type nobody can get a value out of does not
+    /// get used, so this exists — but it is a deliberate hole and worth naming
+    /// as one.
+    ///
+    /// Today it is harmless: no Amount records a currency, so the number is the
+    /// whole value. **When one does, this returns a value stripped of its unit
+    /// while every existing call site goes on compiling** — and adding two
+    /// magnitudes drawn from different currencies is exactly the mistake the
+    /// type exists to prevent. At that point this should be renamed to
+    /// something that reads wrong at a call site doing arithmetic with it; a
+    /// name is the only warning available once the number is out.
+    ///
+    /// Reach for an operation before reaching for this. [`Amount::ratio_to`]
+    /// exists because this crate's own test was using the hatch to divide two
+    /// Amounts, which was evidence the operation was needed rather than that
+    /// the hatch was fine.
     #[must_use]
     pub const fn magnitude(self) -> f64 {
         self.0
+    }
+
+    /// How many times this Amount the other is — a dimensionless ratio.
+    ///
+    /// `FV/PV` is the accumulation factor reached from the other direction,
+    /// which is what makes this the route to solving for a rate or a span.
+    ///
+    /// The result is a bare number, not a
+    /// [`SimpleAccumulationFactor`](crate::SimpleAccumulationFactor): a ratio
+    /// of two Amounts may be negative or zero, and a factor may not.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::ZeroDivisor`] if `other` is zero — the ratio to nothing is
+    /// undefined rather than large, so it is a domain failure and not a range
+    /// one. [`Error::NotFinite`] if the ratio overflows, which is a range one.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use time_value::Amount;
+    ///
+    /// let future = Amount::new(115.0)?;
+    /// let present = Amount::new(100.0)?;
+    /// assert!((future.ratio_to(present)? - 1.15).abs() < 1e-12);
+    ///
+    /// assert!(future.ratio_to(Amount::new(0.0)?).is_err());
+    /// # Ok::<(), time_value::Error>(())
+    /// ```
+    pub fn ratio_to(self, other: Self) -> Result<f64> {
+        if other.0 == 0.0 {
+            return Err(Error::ZeroDivisor);
+        }
+        let ratio = self.0 / other.0;
+        if ratio.is_finite() {
+            Ok(ratio)
+        } else {
+            Err(Error::NotFinite {
+                quantity: Quantity::Product,
+            })
+        }
     }
 
     /// Whether two Amounts agree to within a [`Tolerance`].
@@ -268,6 +320,34 @@ mod tests {
         let t = Tolerance::absolute(1.0).expect("valid");
         assert!(a.is_close(b, t) && b.is_close(c, t));
         assert!(!a.is_close(c, t));
+    }
+
+    #[test]
+    fn a_ratio_recovers_how_many_times_one_amount_the_other_is() {
+        let future = Amount::new(115.0).expect("valid");
+        let present = Amount::new(100.0).expect("valid");
+        let ratio = future.ratio_to(present).expect("100 is not zero");
+        assert!((ratio - 1.15).abs() < 1e-12, "got {ratio}");
+    }
+
+    #[test]
+    fn a_ratio_to_zero_is_undefined_not_large() {
+        // A domain failure: no wider representation answers it. Reported
+        // differently from a ratio that merely overflows.
+        let error = Amount::new(1.0)
+            .expect("valid")
+            .ratio_to(Amount::new(0.0).expect("valid"))
+            .expect_err("the ratio to nothing is undefined");
+        assert!(matches!(error, Error::ZeroDivisor), "{error:?}");
+    }
+
+    #[test]
+    fn a_ratio_that_overflows_is_a_range_failure() {
+        let error = Amount::new(f64::MAX)
+            .expect("valid")
+            .ratio_to(Amount::new(f64::MIN_POSITIVE).expect("valid"))
+            .expect_err("MAX / MIN_POSITIVE does not fit");
+        assert!(matches!(error, Error::NotFinite { .. }), "{error:?}");
     }
 
     #[test]

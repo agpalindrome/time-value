@@ -9,7 +9,7 @@ verified:
   - { by: human:ojhermann, at: 2026-08-07T15:13:35Z }
   - { by: human:ojhermann, at: 2026-08-07T15:40:47Z }
   - { by: human:ojhermann, at: 2026-08-07T18:50:30Z }
-generated: { by: claude/opus-5, at: 2026-08-07T17:53:00Z }
+generated: { by: claude/opus-5, at: 2026-08-07T18:56:06Z }
 sources:
   - id: wikipedia-fv
     resource: https://en.wikipedia.org/wiki/Future_value
@@ -63,19 +63,31 @@ single existing signature. Exposing it directly would forfeit that, and with it
 the flexibility above. This is a constraint on the implementation, not a
 preference.
 
-**A read accessor is not the same thing, and its cost is real.** The field stays
-private, so the invariant holds and cannot be circumvented — but a method
-handing the number out means every operation listed below as _unimplemented_,
-including the meaningless ones, is reachable by a caller willing to do the
-arithmetic themselves. More importantly for the deferral above: once an Amount
-records a currency, such an accessor returns a partial view of the value while
-every existing call site goes on compiling. Nothing warns.
+**Decided — a read accessor exists, and is a deliberate hole.** The field stays
+private, so the invariant holds and cannot be circumvented. But a method handing
+the number out puts every operation listed below as _unimplemented_ — including
+the meaningless ones — within reach of a caller willing to do the arithmetic
+themselves.
 
-This is recorded rather than resolved. The accessor exists because a value type
-with no way out is not usable, and the alternative — routing every caller
-through rendering and parsing — is worse. What it costs is that "without
-altering a single existing signature" is true of the signatures and not of their
-meaning.
+The accessor stays because a value type nobody can get a value out of does not
+get used, and the alternative of routing every caller through rendering and
+parsing is worse. What it costs is worth stating exactly: once an Amount records
+a currency, the accessor returns a value stripped of its unit while every
+existing call site goes on compiling, and adding two magnitudes drawn from
+different currencies is precisely the mistake this type exists to prevent. So
+"without altering a single existing signature" is true of the signatures and not
+of their meaning.
+
+**Decided — the accessor is renamed when a currency lands.** Once the number it
+returns is a partial view, its name is the only warning left, and it should read
+wrong at a call site doing arithmetic with it. That is the trigger; there is
+nothing to rename while the number is still the whole value.
+
+**Derived — reaching through the hatch is evidence an operation is missing, not
+that the hatch is acceptable.** This library's own test used it to divide two
+Amounts — an operation named in the table below as true and merely
+unimplemented. That was the argument for implementing it rather than for leaving
+the hatch to absorb the need. The same reading applies to the next one.
 
 **Derived — when a currency is named, it is a value the Amount carries, not a
 tag in its type.** A currency is chosen while the program runs: parsed from an
