@@ -57,8 +57,8 @@ first real test**; nextest failing on zero tests is the check working.
 
 ## CI and releases
 
-CI runs on pushes to `main` and on pull requests. It is **not** a required status
-check — that gate was removed deliberately.
+CI runs on pushes to `main` and on pull requests. It is **not** a required
+status check — that gate was removed deliberately.
 
 Merging to `main` requires a pull request, with zero required approvals (GitHub
 forbids self-approval, so any higher count would block a sole maintainer) and an
@@ -71,10 +71,10 @@ inferred from the work looking finished.
 ## Repo settings as code
 
 This repo's own rulesets live in `.github/rulesets/` and are reconciled by
-`scripts/settings.sh --check` / `--apply` — owner-run, deliberately not in CI, so
-settings never change silently. Org-wide rules come from `~/github-settings` and
-are invisible to that script; the layers compose and GitHub enforces the more
-restrictive.
+`scripts/settings.sh --check` / `--apply` — owner-run, deliberately not in CI,
+so settings never change silently. Org-wide rules come from `~/github-settings`
+and are invisible to that script; the layers compose and GitHub enforces the
+more restrictive.
 
 Change a repo-level GitHub setting by editing the JSON and applying it, never by
 clicking. Per the global rules, that change is made by a
@@ -86,12 +86,13 @@ Layered on the global floor in `~/.claude/CLAUDE.md`.
 
 - **Ask before deleting** `LICENSE-*`, `Cargo.lock`, or `rust-toolchain.toml`.
 - **Never rename** the published `time_value` crate.
-- **New crates** join under `crates/`, inherit `[workspace.package]`, and **must**
-  carry `[lints] workspace = true`. Non-core crates start `publish = false`.
+- **New crates** join under `crates/`, inherit `[workspace.package]`, and
+  **must** carry `[lints] workspace = true`. Non-core crates start
+  `publish = false`.
 
 ## Conventions
 
-- Branch names match `^(feat|fix|chore|docs|refactor)/.*` (repo ruleset). Commits
-  are Conventional Commits.
+- Branch names match `^(feat|fix|chore|docs|refactor)/.*` (repo ruleset).
+  Commits are Conventional Commits.
 - Comments supplement the code and the structure — they earn their place by
   naming a trap, not by restating the line below them.
