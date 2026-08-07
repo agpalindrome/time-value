@@ -6,8 +6,9 @@
 crates.io as `time_value` (the GitHub repo is `time-value`, kebab-cased per the
 org ruleset).
 
-One crate, `crates/time_value`, built against the Knowledge Bundle described
-below.
+One published crate, `crates/time_value`, built against the Knowledge Bundle
+described below, plus `crates/bundle-check` — internal, unpublished — whose
+tests assert the bundle's own invariants.
 
 ## The Knowledge Bundle comes first
 
@@ -109,7 +110,11 @@ It also refuses to run against a stable `rustfmt`: most of `rustfmt.toml` is
 nightly-only and stable ignores it silently, so that would be a pass which
 verified almost nothing.
 
-**Validate the bundle separately after touching `knowledge/`:**
+The bundle's **invariants** — what its frontmatter must say — are tests in
+`crates/bundle-check`, so `check.sh` covers them. They are not listed here; the
+tests are their definition. Its **structure and links** are not covered:
+
+**Validate those separately after touching `knowledge/`:**
 
 ```sh
 nix run ~/okf-tools#okf-graph -- knowledge

@@ -1,0 +1,16 @@
+[package]
+name        = "bundle-check"
+description = "Invariants of the knowledge bundle, checked as tests"
+version     = "0.0.0"
+publish     = false
+
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+repository.workspace    = true
+
+[dependencies]
+saphyr = { workspace = true }
+
+[lints]
+workspace = true

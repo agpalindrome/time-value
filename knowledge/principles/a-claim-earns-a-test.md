@@ -6,8 +6,8 @@ description:
   when the code stops honouring it.
 tags: [standing-rule, testing]
 status: stable
-verified: { by: human:ojhermann, at: 2026-08-07T18:50:30Z }
-generated: { by: claude/opus-5, at: 2026-08-07T17:53:00Z }
+verified: { by: human:ojhermann, at: 2026-08-07T21:29:40Z }
+generated: { by: claude/opus-5, at: 2026-08-07T19:26:07Z }
 ---
 
 # The rule
@@ -58,6 +58,37 @@ Each of these was found in this library, not imagined:
 - **An absence.** That two arguments cannot be transposed, or that an operator
   is deliberately not implemented, is a claim like any other. A `compile_fail`
   test is the instrument.
+
+# Prove the check can fail
+
+**Decided — a check is not believed until it has been seen to go red.** A
+verification script is code, and this rule applies to it before it applies to
+anything it verifies.
+
+The evidence is embarrassing and worth keeping. The script written to stop the
+checks drifting shipped with two defects, both of which made its own summary
+decorative and neither of which a green run could reveal:
+
+- The exit status was captured one line late, so it recorded the success of an
+  array append rather than the check. Every check reported a pass whatever
+  happened.
+- An unquoted `**/*.md` glob was expanded by the shell rather than the
+  formatter, and a shell without `globstar` reads `**` as `*` — so it matched
+  one directory deep and skipped every file at the repository root.
+
+Both were found by breaking a file on purpose and watching the run stay green.
+Neither would have been found any other way.
+
+The same failure recurred all day in ad-hoc shell: a pipe swallowing an exit
+code, a quoted value breaking a string comparison, a context flag reading past a
+list into the wrong field. `grep`, `tail`, `$?` and globs fail **soft** — they
+produce a plausible answer instead of an error, which is the worst way for a
+check to fail, because the reader cannot tell.
+
+**Derived — prefer a parser to a pattern for anything structured.** Every one of
+those misreads was a shell pipeline interrogating YAML. The invariants they were
+groping at are now a test that parses the frontmatter, and each one was
+confirmed to fail against a deliberately broken bundle before being trusted.
 
 # What a test may not stand in for
 

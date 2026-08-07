@@ -2,6 +2,12 @@
 
 ## 2026-08-07
 
+- **Update**: Recorded in
+  [a claim earns a test](principles/a-claim-earns-a-test.md) that a check is not
+  believed until it has been seen to go red, and that a parser beats a pattern
+  for anything structured. The bundle's own invariants are now a test rather
+  than a shell pipeline, each confirmed to fail against a deliberately broken
+  bundle.
 - **Update**: Decided in [amount](domain/amount.md) that the read accessor
   stays, is a deliberate hole, and is renamed when a currency lands — at which
   point its name is the only warning left. Recorded the derived reading that
