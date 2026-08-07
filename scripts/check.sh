@@ -39,6 +39,15 @@ CHECKS=(
   "nixfmt|git ls-files -z '*.nix' | xargs -0 nixfmt --check"
   # Reports by default; only `--write-changes` edits.
   "typos|typos"
+  # The bundle's *structure and links*. Its frontmatter invariants are tests in
+  # crates/bundle-check; this is the other half, and it ran by hand from a
+  # sibling repo's flake until okf-tools became a locked input here.
+  #
+  # Measured: it exits 1 on a defect and 0 on a report, so a dangling link
+  # prints and does not fail the run. That is the spec's split, not a bug —
+  # §6/§11 say a broken cross-link MUST NOT be rejected — so read the output
+  # rather than only the verdict.
+  "bundle|okf-graph knowledge"
   "clippy|cargo clippy --workspace --all-targets --locked"
   "test|cargo nextest run --workspace --locked"
   "doctest|cargo test --doc --workspace --locked"

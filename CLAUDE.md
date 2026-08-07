@@ -125,19 +125,22 @@ The sentence above said "the only definition of what must **pass**" until
 2026-08-07, which was false in exactly the way it warns against: it named one
 definition where there were two.
 
-The bundle's **invariants** — what its frontmatter must say — are tests in
-`crates/bundle-check`, so `check.sh` covers them. They are not listed here; the
-tests are their definition. Its **structure and links** are not covered:
+The bundle is checked in two halves, and both are in `check.sh`. Its
+**invariants** — what its frontmatter must say — are tests in
+`crates/bundle-check`; they are not listed here, because the tests are their
+definition. Its **structure and links** are `okf-graph`, which comes from
+`okf-tools` as a locked flake input and runs as the `bundle` check.
 
-**Validate those separately after touching `knowledge/`:**
+`okf-graph` exits non-zero on a **defect** and zero on a **report**, so a
+dangling cross-link prints and does not fail the run. That is the spec's own
+split — §6 and §11 say a broken link MUST NOT be rejected — so read what the
+check printed, not only whether it passed.
+
+Update the checker deliberately, never as a side effect:
 
 ```sh
-nix run ~/okf-tools#okf-graph -- knowledge
+nix flake update okf-tools
 ```
-
-That is not in the script and not in CI — it runs from a sibling repo's flake,
-so nothing stops a malformed bundle merging. Issue #136 tracks folding it in
-once `okf-graph` is a crate.
 
 ## CI and releases
 
