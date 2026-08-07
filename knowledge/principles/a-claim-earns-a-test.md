@@ -6,8 +6,10 @@ description:
   when the code stops honouring it.
 tags: [standing-rule, testing]
 status: stable
-verified: { by: human:ojhermann, at: 2026-08-07T21:29:40Z }
-generated: { by: claude/opus-5, at: 2026-08-07T19:26:07Z }
+verified:
+  - { by: human:ojhermann, at: 2026-08-07T21:29:40Z }
+  - { by: human:ojhermann, at: 2026-08-07T22:22:09Z }
+generated: { by: claude/opus-5, at: 2026-08-07T22:06:40Z }
 ---
 
 # The rule
@@ -97,6 +99,16 @@ computed values is the common error. The toolchain enforces this independently
 here: comparing two binary floats with `assert_eq!` inside a test is a hard
 error under the denied `pedantic` group, and the usual test exemptions have no
 member covering it. Measured 2026-08-07.
+
+**Corrected 2026-08-07 — that enforcement has a hole, and the earlier
+unqualified claim hid it.** `float_cmp` exempts itself by the enclosing
+function's name: a test called `eq`, `ne` or `is_nan`, or one whose name starts
+`eq_` or ends `_eq`, compiles clean. Measured; the detail is in
+[Amount](../domain/amount.md#equality). This is
+[prove the check can fail](#prove-the-check-can-fail) pointed at a linter, which
+is a check like any other: the guarantee was believed because the lint had been
+seen to go red, never because it had been seen to go red **in the shape being
+relied on**. A tool's silence is evidence only for the case it was watched on.
 
 So a test comparing a computed amount against an expected one states its
 tolerance explicitly, and states both halves of it — see

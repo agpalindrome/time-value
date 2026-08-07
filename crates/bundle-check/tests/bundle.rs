@@ -3,6 +3,15 @@
 //! These ran as shell one-liners before they ran as tests, and misreported
 //! repeatedly — always by producing a plausible answer rather than an error.
 //! Every assertion here replaces one of those.
+//!
+//! Two kinds of assertion live here and they are not the same authority. A few
+//! are the spec's conformance rules (§11); the rest are this repo's own
+//! discipline, stricter than the spec and deliberately so. Each of the latter
+//! says **house rule** in its first line, because §11 spends most of its text
+//! telling consumers *not* to reject a bundle for exactly what is demanded
+//! below — so a reader who cannot tell the two apart will take a local choice
+//! for an external requirement and, worse, will not know which ones are ours to
+//! change.
 
 use std::path::{Path, PathBuf};
 
@@ -49,6 +58,11 @@ fn every_concept_declares_a_type() {
 
 #[test]
 fn every_status_is_one_the_spec_defines() {
+    // House rule, despite the name: §5.4 does enumerate the three values, but
+    // §11 leaves rejecting anything else to the consumer — "all other
+    // constraints" are soft guidance there. The enumeration is the spec's; the
+    // rejection is ours.
+    //
     // Absent is legal and means stable. A typo is not, and would otherwise be
     // read as an unknown value rather than rejected.
     for (path, front) in concepts() {
@@ -69,6 +83,8 @@ fn every_status_is_one_the_spec_defines() {
 
 #[test]
 fn every_actor_is_well_formed() {
+    // §7, as far as it goes. It contradicts §5.1's own example, and
+    // `actor_is_well_formed`'s docstring says which side this took.
     for (path, front) in concepts() {
         for actor in front.actors {
             assert!(
@@ -81,6 +97,11 @@ fn every_actor_is_well_formed() {
 
 #[test]
 fn every_concept_records_who_generated_it_and_when() {
+    // House rule. §4.1 makes the whole `generated` family optional and §5.2
+    // marks only `by` required within it; `at` is described, not demanded. Both
+    // are demanded here because `generated.at` is what the staleness check below
+    // compares against — a concept without one can never be stale, which is the
+    // quiet pass this crate exists to prevent.
     for (path, front) in concepts() {
         assert!(front.generated_by.is_some(), "{path}: no `generated.by`");
         assert!(front.generated_at.is_some(), "{path}: no `generated.at`");
@@ -89,6 +110,12 @@ fn every_concept_records_who_generated_it_and_when() {
 
 #[test]
 fn a_stable_concept_carries_a_verification() {
+    // House rule, and one the spec argues against: §5.3 says a concept with no
+    // trust frontmatter is still consumable and consumers MUST NOT reject it,
+    // and §11 repeats it. That rule governs a consumer reading a bundle it did
+    // not write. This is the producer gating its own, where `stable` is a claim
+    // this repo makes about its own work.
+    //
     // Stable means ready for consumption. Saying so without anyone having
     // confirmed it is the claim this catches.
     for (path, front) in concepts() {
@@ -103,6 +130,12 @@ fn a_stable_concept_carries_a_verification() {
 
 #[test]
 fn no_stable_concept_has_changed_since_it_was_verified() {
+    // House rule, and the widest departure here: §5.2 states that `verified` is
+    // independent of `generated.at` — "content can change without
+    // re-confirmation" — and describes that state as ordinary. This repo makes
+    // it fatal, because a verification is the only thing separating a concept
+    // someone read from a concept something wrote.
+    //
     // The invariant this whole crate exists for. `generated.at` moves whenever
     // a concept changes materially, so a newest verification that predates it
     // means the concept says something nobody has read.
@@ -137,6 +170,14 @@ fn no_stable_concept_has_changed_since_it_was_verified() {
 
 #[test]
 fn every_timestamp_is_the_format_the_comparison_assumes() {
+    // House rule, and a precondition rather than a conformance rule: §5.2 asks
+    // only for "an ISO 8601 datetime", which admits `+00:00` — §10's own
+    // `timestamp` example is written that way. The narrow shape below is what
+    // the string comparison needs, not what the spec requires, so a bundle this
+    // rejects may still be conformant. okf-tools#72 proposes okf-graph parse
+    // these into datetimes instead, which would remove the need for the
+    // narrowing.
+    //
     // The test above compares timestamps as strings, which is only
     // chronological while every one is the same fixed-offset ISO 8601 shape.
     // A `+01:00` offset or a missing `Z` would silently make that comparison
