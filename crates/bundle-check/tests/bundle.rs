@@ -52,12 +52,18 @@ fn every_status_is_one_the_spec_defines() {
     // Absent is legal and means stable. A typo is not, and would otherwise be
     // read as an unknown value rather than rejected.
     for (path, front) in concepts() {
-        if let Some(status) = front.status {
-            assert!(
-                matches!(status.as_str(), "draft" | "stable" | "deprecated"),
-                "{path}: status `{status}` is not draft, stable or deprecated"
-            );
+        if !front.has_status_key {
+            continue;
         }
+        // A `status` that is present but not a string — `status: true` — read
+        // as absent, so this test skipped it entirely and passed vacuously.
+        let status = front
+            .status
+            .unwrap_or_else(|| panic!("{path}: `status` is present but not a string"));
+        assert!(
+            matches!(status.as_str(), "draft" | "stable" | "deprecated"),
+            "{path}: status `{status}` is not draft, stable or deprecated"
+        );
     }
 }
 
@@ -101,8 +107,11 @@ fn no_stable_concept_has_changed_since_it_was_verified() {
     // a concept changes materially, so a newest verification that predates it
     // means the concept says something nobody has read.
     //
-    // Draft is exempt: a concept being worked on is expected to sit unverified,
-    // and `status` is the field that says so.
+    // Draft and deprecated are both exempt, and the code below says `!= stable`
+    // rather than `== draft` deliberately. A concept being worked on is
+    // expected to sit unverified, and a deprecated one is "kept for links and
+    // history; no longer current" in the spec's words — staleness against a
+    // verification is not a question worth asking of either.
     //
     // The timestamps are ISO 8601 with a fixed `Z` offset throughout, so
     // comparing them as strings is comparing them chronologically. Anything
@@ -132,11 +141,21 @@ fn every_timestamp_is_the_format_the_comparison_assumes() {
     // chronological while every one is the same fixed-offset ISO 8601 shape.
     // A `+01:00` offset or a missing `Z` would silently make that comparison
     // meaningless, so the assumption is pinned rather than trusted.
+    // Every position, not four of them. The earlier version checked length,
+    // the trailing Z, and the separators at 4 and 10 — which an ISO 8601 *week
+    // date* satisfies: `2026-W01-1T00:00:00Z` is twenty characters with the
+    // right separators, and `W` sorts above every digit, so it compared as
+    // newer than any calendar date and defeated the staleness check while
+    // passing this one.
     let iso_utc = |t: &str| {
-        t.len() == 20
-            && t.ends_with('Z')
-            && t.chars().nth(4) == Some('-')
-            && t.chars().nth(10) == Some('T')
+        let shape = "dddd-dd-ddTdd:dd:ddZ";
+        t.len() == shape.len()
+            && t.chars()
+                .zip(shape.chars())
+                .all(|(actual, expected)| match expected {
+                    'd' => actual.is_ascii_digit(),
+                    other => actual == other,
+                })
     };
     for (path, front) in concepts() {
         if let Some(at) = &front.generated_at {

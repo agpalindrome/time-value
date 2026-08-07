@@ -22,6 +22,10 @@ pub struct Frontmatter {
     /// `status`, absent meaning `stable` per the spec — recorded as written so
     /// an invalid value can be reported rather than silently defaulted.
     pub status: Option<String>,
+    /// Whether a `status` key was present at all, which `status` alone cannot
+    /// say: a non-string value reads as `None` exactly like an absent key, and
+    /// a check that treats the two alike passes over the malformed one.
+    pub has_status_key: bool,
     /// `generated.by`, an actor.
     pub generated_by: Option<String>,
     /// `generated.at`, an ISO 8601 datetime.
@@ -44,6 +48,29 @@ pub enum ParseError {
     Malformed(String),
     /// The frontmatter parsed, but not to a mapping.
     NotAMapping,
+    /// A field that must be a list is something else.
+    NotASequence(String),
+    /// A key appears more than once at the top level.
+    ///
+    /// YAML 1.2 makes this an error; the parser used here takes the last
+    /// silently, so a duplicate `generated` hides the earlier one and with it
+    /// whatever it said. That is the shape a bad merge or an appended edit
+    /// produces, so it is rejected rather than resolved.
+    DuplicateKey(String),
+}
+
+/// Top-level keys, in order, as written.
+///
+/// Read from the text rather than the parsed value because the parse has
+/// already discarded the duplicates by then.
+fn top_level_keys(block: &str) -> Vec<String> {
+    block
+        .lines()
+        .filter(|line| !line.starts_with([' ', '\t', '-', '#']))
+        .filter_map(|line| line.split_once(':'))
+        .map(|(key, _)| key.trim().to_owned())
+        .filter(|key| !key.is_empty())
+        .collect()
 }
 
 fn text(node: &Yaml<'_>) -> Option<String> {
@@ -64,6 +91,13 @@ pub fn parse(document: &str) -> Result<Frontmatter, ParseError> {
         .strip_prefix("---\n")
         .and_then(|rest| rest.split_once("\n---\n"))
         .ok_or(ParseError::MissingFrontmatter)?;
+
+    let keys = top_level_keys(block);
+    for (index, key) in keys.iter().enumerate() {
+        if keys.iter().skip(index + 1).any(|later| later == key) {
+            return Err(ParseError::DuplicateKey(key.clone()));
+        }
+    }
 
     let docs = Yaml::load_from_str(block).map_err(|e| ParseError::Malformed(e.to_string()))?;
     let doc = docs.first().ok_or(ParseError::NotAMapping)?;
@@ -107,7 +141,14 @@ pub fn parse(document: &str) -> Result<Frontmatter, ParseError> {
         }
     }
 
-    if let Some(seq) = get("sources").as_ref().and_then(Yaml::as_sequence) {
+    // A `sources` that is present but not a sequence was previously skipped in
+    // silence, so every author in it went unchecked — and the malformed shape
+    // was the one that passed.
+    let sources = get("sources");
+    if let Some(node) = sources.as_ref() {
+        let seq = node
+            .as_sequence()
+            .ok_or_else(|| ParseError::NotASequence("sources".to_owned()))?;
         for source in seq {
             if let Some(author) = source
                 .as_mapping()
@@ -122,6 +163,7 @@ pub fn parse(document: &str) -> Result<Frontmatter, ParseError> {
     Ok(Frontmatter {
         concept_type: get("type").as_ref().and_then(text),
         status: get("status").as_ref().and_then(text),
+        has_status_key: get("status").is_some(),
         generated_by,
         generated_at,
         verified_at,
@@ -139,9 +181,9 @@ pub fn parse(document: &str) -> Result<Frontmatter, ParseError> {
 #[must_use]
 pub fn actor_is_well_formed(actor: &str) -> bool {
     let two_parts = |sep: char| {
-        actor
-            .split_once(sep)
-            .is_some_and(|(a, b)| !a.is_empty() && !b.is_empty() && !a.contains(' '))
+        actor.split_once(sep).is_some_and(|(a, b)| {
+            !a.is_empty() && !b.is_empty() && !a.contains(' ') && !b.contains(' ')
+        })
     };
     two_parts('/') || two_parts(':')
 }
@@ -243,5 +285,63 @@ mod tests {
         for actor in ["alice", "", "human:", ":id", "a b/c"] {
             assert!(!actor_is_well_formed(actor), "{actor} should be rejected");
         }
+    }
+
+    #[test]
+    fn rejects_a_space_on_either_side_of_the_separator() {
+        // The check tested only the left half, so `human:x y` and
+        // `claude/ opus 5` were accepted. One-sided validation looks complete
+        // until the mirror case is written down.
+        for actor in ["human:x y", "claude/ opus 5", "team: ", "a b:c"] {
+            assert!(!actor_is_well_formed(actor), "{actor} should be rejected");
+        }
+    }
+
+    #[test]
+    fn rejects_a_duplicate_top_level_key() {
+        // YAML 1.2 calls this an error; the parser takes the last silently, so
+        // a second `generated` hides the first and whatever it said. It is the
+        // shape a bad merge produces.
+        let document = concat!(
+            "---\n",
+            "type: Principle\n",
+            "generated: { by: a/1, at: 2026-06-01T00:00:00Z }\n",
+            "generated: { by: a/1, at: 2025-01-01T00:00:00Z }\n",
+            "---\n\nbody\n"
+        );
+        assert_eq!(
+            parse(document),
+            Err(ParseError::DuplicateKey("generated".to_owned()))
+        );
+    }
+
+    #[test]
+    fn rejects_sources_that_is_not_a_list() {
+        // Previously skipped in silence, so every author inside went
+        // unchecked — and the malformed shape was the one that passed.
+        let document = concat!(
+            "---\n",
+            "type: Principle\n",
+            "sources:\n",
+            "  an-id:\n",
+            "    author: alice\n",
+            "---\n\nbody\n"
+        );
+        assert_eq!(
+            parse(document),
+            Err(ParseError::NotASequence("sources".to_owned()))
+        );
+    }
+
+    #[test]
+    fn distinguishes_an_absent_status_from_an_unreadable_one() {
+        // `status: true` reads as `None` exactly like an absent key, so a check
+        // treating the two alike passes over the malformed one.
+        let absent = parse("---\ntype: Principle\n---\n\nbody\n").expect("parses");
+        assert!(!absent.has_status_key && absent.status.is_none());
+
+        let unreadable =
+            parse("---\ntype: Principle\nstatus: true\n---\n\nbody\n").expect("parses");
+        assert!(unreadable.has_status_key && unreadable.status.is_none());
     }
 }
