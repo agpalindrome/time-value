@@ -7,7 +7,7 @@ status: stable
 verified:
   - { by: human:ojhermann, at: 2026-08-07T02:37:35Z }
   - { by: human:ojhermann, at: 2026-08-07T15:13:35Z }
-generated: { by: claude/opus-5, at: 2026-08-07T15:33:22Z }
+generated: { by: claude/opus-5, at: 2026-08-07T15:38:55Z }
 sources:
   - id: wikipedia-fv
     resource: https://en.wikipedia.org/wiki/Future_value
@@ -279,6 +279,46 @@ reconciling a ledger or checking that a solve converged. The caller names it.
 That costs one argument and prevents a silently wrong answer, which is the trade
 made everywhere else here.
 
+# Rendering is two operations, and only one belongs here
+
+The two purposes are opposed. Displaying for a person means discarding digits;
+reconstructing a value means discarding none. One operation cannot do both, so
+this splits exactly as
+[comparison](#approximate-comparison-is-two-operations-not-one) does.
+
+**Decided — this library renders exactly, and human presentation belongs to
+whatever sits in front of it.** Symbols, digit grouping, locale, negatives in
+parentheses — those are an application's policy, and a library that fixes them
+has claimed a decision that was not its to make.
+
+**Decided — the rendering is unambiguous and unlocalized.** The shortest text
+that reconstructs the value, plus the currency **code** when one is recorded,
+and nothing that implies a currency when none is. A code rather than a symbol:
+`USD` identifies one currency, `$` identifies more than a dozen.
+
+**Decided — exactness wins over looking tidy.** An exact rendering shows
+`0.1 + 0.2` as `0.30000000000000004`. That is ugly and people will ask for it to
+be rounded. Rounding at the boundary would conceal the representation error this
+Concept exists to make visible, and the standing posture is that a wrong number
+which says nothing is worse than an honest number that looks awkward.
+
+**Decided — a rounded rendering is the caller's to specify, and the library's to
+enable.** It needs two things, not one: how many places, _and_ which rounding
+mode — half-even, half-up, half-away-from-zero, truncate. Those differ by
+jurisdiction and by contract, and picking one would be the library making a
+judgement it cannot make on the caller's behalf. It is the same shape as the
+[tolerance](#the-numerical-comparison-is-a-hybrid-and-neither-pure-form-works):
+supply the mechanism, require the caller to state the intent. Both the place
+count and the mode defer with currency, since the place count is a currency's
+minor unit.
+
+**Derived — an exact rendering has an inverse, and the pair states a law.**
+Parsing reconstructs what rendering wrote, so `parse(render(a)) == a` holds for
+every Amount. This is a round-trip property, the strongest shape available
+because it can be stated without reimplementing anything, and it is the first
+real property this library can be tested against. It exists as a consequence of
+choosing exactness, not as something added on top.
+
 # The representation is a parameter
 
 **Decided — which numeric representation carries an Amount is the caller's
@@ -372,7 +412,10 @@ not decide them.
   until two Amounts actually meet, which no operation here yet does. Neither is
   an Amount: a currency is a unit and carries no magnitude, and a rate is a
   quantity whose dimension is a ratio of two units.
-- How an Amount renders. Tied to the absent rounding rule above: a rendering
-  that shows two decimal places has chosen one, whether or not it says so.
+
+Everything else once parked here has collapsed into that one question. A
+currency's minor unit is what supplies a settlement tolerance and a rounded
+rendering's place count alike, so both wait on the same answer and neither is
+needed before it.
 
 [^wikipedia-fv]: _Future value_, Wikipedia, revision last modified 2026-08-04.
