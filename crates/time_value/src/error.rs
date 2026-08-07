@@ -24,11 +24,27 @@ pub enum Error {
         factor: f64,
     },
 
-    /// A computed value left the range the representation can hold.
+    /// A value is not finite — a NaN or an infinity.
     ///
-    /// A representation failure, not a modelling one: the same inputs in a
+    /// Either an input that was never a definite quantity, or arithmetic that
+    /// left the range the representation can hold. The second is a
+    /// representation failure rather than a modelling one: the same inputs in a
     /// wider representation would succeed.
     NotFinite,
+
+    /// A span of elapsed periods is negative.
+    ///
+    /// A domain failure. Running the formula backwards does not discount — the
+    /// inverse of simple accumulation is division, not evaluation at a negative
+    /// argument — so a negative span is refused rather than answering a
+    /// different question convincingly.
+    NegativePeriods {
+        /// The offending span.
+        periods: f64,
+    },
+
+    /// Text that does not parse as the quantity it was read for.
+    Unparsable,
 }
 
 impl fmt::Display for Error {
@@ -37,7 +53,11 @@ impl fmt::Display for Error {
             Self::NonPositiveFactor { factor } => {
                 write!(f, "accumulation factor `1 + rt` is {factor}, not positive")
             }
-            Self::NotFinite => f.write_str("result is not finite"),
+            Self::NotFinite => f.write_str("value is not finite"),
+            Self::NegativePeriods { periods } => {
+                write!(f, "elapsed periods is {periods}, which is negative")
+            }
+            Self::Unparsable => f.write_str("text does not parse as a number"),
         }
     }
 }

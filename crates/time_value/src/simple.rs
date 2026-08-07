@@ -1,12 +1,8 @@
-//! Future value under simple interest, over `f64` directly.
+//! The arithmetic of simple interest, over `f64` directly.
 //!
-//! This is the first of two steps. The behaviour is settled here, in tests,
-//! before any type exists to enforce it — so the types that follow are
-//! answering a question already asked rather than defining it.
-//!
-//! The functions here are the arithmetic. What the typed layer adds is
-//! validation at construction, so an invalid value cannot be built at all;
-//! these still have to check, because an `f64` carries no invariant.
+//! Private. What the typed layer adds is validation at construction, so an
+//! invalid value cannot be built at all; this still has to check, because an
+//! `f64` carries no invariant.
 
 use crate::error::{Error, Result};
 
@@ -18,7 +14,7 @@ use crate::error::{Error, Result};
 /// domain failure, where `rate` and `periods` are each valid and jointly
 /// meaningless. [`Error::NotFinite`] when the factor leaves the representable
 /// range, which is a different problem with a different remedy.
-pub fn accumulation_factor(rate: f64, periods: f64) -> Result<f64> {
+pub(crate) fn accumulation_factor(rate: f64, periods: f64) -> Result<f64> {
     let factor = periods.mul_add(rate, 1.0);
     if !factor.is_finite() {
         return Err(Error::NotFinite);
@@ -29,30 +25,13 @@ pub fn accumulation_factor(rate: f64, periods: f64) -> Result<f64> {
     Ok(factor)
 }
 
-/// `FV = PV(1 + rt)`.
-///
-/// # Errors
-///
-/// Whatever [`accumulation_factor`] reports, or [`Error::NotFinite`] when the
-/// product itself leaves the representable range — the factor can be perfectly
-/// valid and the result still too large to hold.
-pub fn future_value(present_value: f64, rate: f64, periods: f64) -> Result<f64> {
-    let factor = accumulation_factor(rate, periods)?;
-    let future = present_value * factor;
-    if future.is_finite() {
-        Ok(future)
-    } else {
-        Err(Error::NotFinite)
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{accumulation_factor, future_value};
+    use super::accumulation_factor;
     use crate::error::Error;
 
-    /// Comparison to within a tolerance, as the concept requires: absolute near
-    /// zero, relative at scale, and never standing in for equality.
+    /// Comparison to within a tolerance: absolute near zero, relative at scale,
+    /// and never standing in for equality.
     fn close(a: f64, b: f64, absolute: f64, relative: f64) -> bool {
         (a - b).abs() <= absolute.max(relative * a.abs().max(b.abs()))
     }
@@ -88,13 +67,7 @@ mod tests {
     }
 
     #[test]
-    fn a_zero_rate_leaves_the_amount_alone() {
-        let future = future_value(100.0, 0.0, 7.0).expect("a zero rate is in the domain");
-        assert!(close(future, 100.0, ABS, REL), "got {future}");
-    }
-
-    #[test]
-    fn a_negative_rate_shrinks_the_amount() {
+    fn a_negative_rate_shrinks_rather_than_invalidates() {
         // Negative rates are real; the factor lies between 0 and 1 and the
         // amount shrinks. That is not the same as the factor being invalid.
         let factor = accumulation_factor(-0.02, 10.0).expect("-2% over 10 periods stays positive");
@@ -123,52 +96,10 @@ mod tests {
     }
 
     #[test]
-    fn a_negative_present_value_stays_negative() {
-        // FV inherits its sign from PV. A liability accumulates into a larger
-        // liability; a positive factor never turns one into an asset.
-        let future = future_value(-100.0, 0.05, 3.0).expect("a liability is a valid amount");
-        assert!(close(future, -115.0, ABS, REL), "got {future}");
-    }
-
-    #[test]
-    fn a_zero_present_value_is_the_fixed_point() {
-        let future = future_value(0.0, 0.05, 3.0).expect("zero is a valid amount");
-        assert!(future.abs() < f64::EPSILON, "got {future}");
-    }
-
-    #[test]
     fn rejects_non_finite_inputs() {
         for (rate, periods) in [(f64::NAN, 1.0), (f64::INFINITY, 1.0), (0.05, f64::NAN)] {
             let error = accumulation_factor(rate, periods).expect_err("non-finite is not a factor");
             assert!(matches!(error, Error::NotFinite), "got {error:?}");
         }
-        assert!(matches!(
-            future_value(f64::NAN, 0.05, 1.0),
-            Err(Error::NotFinite)
-        ));
-    }
-
-    #[test]
-    fn tells_the_two_failures_apart() {
-        // The whole reason the operation is split. Both inputs finite and the
-        // factor valid; only the product leaves the range — so this is a
-        // representation failure, reported differently from the domain one.
-        accumulation_factor(1.0, 1.0).expect("1 + 1*1 = 2 is a valid factor");
-        let error = future_value(f64::MAX, 1.0, 1.0).expect_err("2 * f64::MAX overflows");
-        assert!(matches!(error, Error::NotFinite), "got {error:?}");
-    }
-
-    #[test]
-    fn recovers_the_factor_by_dividing() {
-        // FV/PV is the accumulation factor arrived at from the other direction,
-        // which is why the factor is an object rather than an expression.
-        let (present, rate, periods) = (250.0, 0.04, 2.5);
-        let future = future_value(present, rate, periods).expect("valid");
-        let recovered = future / present;
-        let direct = accumulation_factor(rate, periods).expect("valid");
-        assert!(
-            close(recovered, direct, ABS, REL),
-            "{recovered} vs {direct}"
-        );
     }
 }
