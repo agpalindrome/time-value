@@ -14,6 +14,10 @@ use std::{fs, path::Path};
 
 use saphyr::{LoadableYamlNode, Yaml};
 
+mod check;
+
+pub use check::{Rule, Violation, check};
+
 /// A concept's frontmatter, so far as these invariants care about it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Frontmatter {
