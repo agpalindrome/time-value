@@ -4,8 +4,10 @@ title: Amount
 description: A quantity of money located at a point in time.
 tags: [money, quantity]
 status: stable
-verified: { by: human:ojhermann, at: 2026-08-07T02:37:35Z }
-generated: { by: claude/opus-5, at: 2026-08-07T02:34:52Z }
+verified:
+  - { by: human:ojhermann, at: 2026-08-07T02:37:35Z }
+  - { by: human:ojhermann, at: 2026-08-07T15:13:35Z }
+generated: { by: claude/opus-5, at: 2026-08-07T15:11:05Z }
 sources:
   - id: wikipedia-fv
     resource: https://en.wikipedia.org/wiki/Future_value
@@ -69,6 +71,31 @@ The _period_ shared by `r` and `t` will want the opposite answer for the
 opposite reason — a period is fixed when a model is written, which makes it a
 candidate for a type-level tag. The two questions look alike and are not.
 
+# An absent currency means unrecorded, never unitless
+
+**Decided — absence records that nobody said, and asserts nothing.** Money is
+always denominated; there is no unitless sum of money. So an Amount carrying no
+currency is not claiming to be unitless — that claim would be false about the
+domain. It is only reporting that the unit was not written down.
+
+**Decided — an unknown unit is not silently resolved.** An Amount bearing a
+currency does not combine with one bearing none. Adopting the named currency
+would turn "nobody said" into "it is USD" with no signal, and if the unrecorded
+amount was in fact EUR, the result is a wrong number that never announces
+itself.
+
+The cost of this lands precisely where it should. A caller who names no
+currencies never mixes and pays nothing. A caller who names them all pays
+nothing. Only _partial_ recording is refused — and partial recording is the
+ambiguity worth catching, not an inconvenience the rule creates.
+
+**Derived — this does not oblige an Amount to carry a currency.** That money
+always _has_ a unit is a fact about the domain; whether a program _records_ it
+is an engineering choice with a known cost. A model working throughout in
+implied dollars is not wrong — its unit lives in the modeller's head rather than
+in the data. Requiring the attribute would conflate the two and reverse the
+decision above.
+
 # Domain
 
 - **Always a definite quantity.** A representation's non-values are not Amounts.
@@ -108,6 +135,21 @@ What does not make sense:
   dimensionless number, then multiplies.
 - **Amounts of different units**, without an explicit conversion.
 
+**Derived — changing the unit and keeping it are the same operation.** What
+distinguishes them is the dimension the multiplier carries:
+
+| multiplier's dimension | effect on the unit | example          |
+| ---------------------- | ------------------ | ---------------- |
+| 1 (dimensionless)      | unchanged          | `(1 + rt)`       |
+| `unitA / unitB`        | changed to `unitA` | an exchange rate |
+
+So converting between currencies is not a new kind of operation needing its own
+machinery. It is Amount × multiplier, with a multiplier that happens to carry a
+ratio of units — and the dimensionless case is the one where that ratio is 1.
+
+This also locates the quantity correctly. A currency is a unit and has no
+magnitude; the _rate_ is the quantity, and it is what does the converting.
+
 # Every Amount-returning operation is partial
 
 Because the domain is unbounded and any representation is not, each operation
@@ -125,17 +167,39 @@ as "is finite" describes only the first. Phrasing it as arithmetic that can
 report failure describes both, and is the only phrasing under which a single set
 of requirements covers more than one representation.
 
-# Excluding non-values earns a total order
+# Order holds within a unit, not across units
 
-Amounts are totally ordered. This is a second, independent reason for the rule
-above: NaN is unordered against everything, itself included, so admitting it
-would cost comparison and not merely arithmetic. A representation without
-non-values is totally ordered already.
+Excluding non-values is what makes ordering possible at all: NaN is unordered
+against everything, itself included, so admitting it would cost comparison and
+not merely arithmetic. A representation without non-values is ordered already.
+
+**Decided — Amounts are ordered within a unit, and not across units.** Two
+Amounts in the same named currency compare. Two Amounts that both record no
+currency compare, since the caller's assumption is that they share one. An
+Amount in one currency against an Amount in another does not compare, and
+neither does a currency-bearing Amount against one carrying none.
+
+Comparing across currencies is not a comparison that this library declines to
+make. It is not a comparison at all until the units agree, and making them agree
+is the conversion above — an exchange rate applied first, then an ordinary
+comparison within the resulting unit.
+
+**This amends an earlier claim.** Ordering was first recorded here as _total_,
+which was decided with currency out of view. It is not: it is total within a
+unit and undefined across units. The earlier statement was right about what
+excluding non-values buys and wrong about how far it reaches.
 
 # Equality
 
 **Decided — equality is exact, and inherited from the representation.** Two
 Amounts are equal when their representations hold the same value.
+
+**Decided — equality includes the unit, and stays total across units.** An
+amount in one currency is not equal to the same magnitude in another; they are
+unequal, which is a definite answer. This is why equality survives the unit
+question that [ordering](#order-holds-within-a-unit-not-across-units) does not:
+"are these the same?" has an answer across currencies, and "which is larger?"
+does not.
 
 This is deliberately **not** the claim that they are the same amount of money.
 Two amounts reached by mathematically identical routes can differ in the last
@@ -253,9 +317,10 @@ not decide them.
 
 # Not decided
 
-- What an _absent_ currency means when it meets a named one: unknown, and so
-  adopting it, or explicitly unitless, and so rejecting it. These differ, and
-  choosing wrongly fails silently. Deferred until two Amounts meet.
+- How a currency is represented, and how an exchange rate is. Both are deferred
+  until two Amounts actually meet, which no operation here yet does. Neither is
+  an Amount: a currency is a unit and carries no magnitude, and a rate is a
+  quantity whose dimension is a ratio of two units.
 - What tolerance the approximate comparison uses — absolute, relative, or
   measured in representable steps. Each is right for a different range, and the
   answer depends on the representation and on what the tests actually need.
