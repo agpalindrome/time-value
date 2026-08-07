@@ -6,13 +6,21 @@ description:
 tags: [simple-interest]
 status: stable
 verified: { by: human:ojhermann, at: 2026-08-07T02:37:35Z }
-generated: { by: claude/opus-5, at: 2026-08-07T15:50:27Z }
+generated: { by: claude/opus-5, at: 2026-08-07T16:02:06Z }
 sources:
   - id: wikipedia-fv
     resource: https://en.wikipedia.org/wiki/Future_value
     title: Future value — Wikipedia
     author: team:wikipedia-contributors
     last_modified: 2026-08-04
+  - id: wikipedia-accum
+    resource: https://en.wikipedia.org/wiki/Accumulation_function
+    title: Accumulation function — Wikipedia
+    author: team:wikipedia-contributors
+  - id: fm-notes
+    resource: https://drbeane.github.io/_pages/courses/mth324/FM%20Notes.pdf
+    title: FM Notes, Chapter 1 — The Measurement of Interest
+    author: human:drbeane
 ---
 
 # Statement
@@ -97,12 +105,61 @@ rather than left implicit, for three reasons:
   holds an annual quantity and a per-period quantity in one expression. It is
   where periodicity must be answered.
 
+# The accumulation factor must stay positive
+
+`(1 + rt)` is an accumulation function, and a valid one carries two criteria.
+The FM notes state them directly: "There are two criteria that a function must
+satisfy to be a valid accumulation function. These are that a(0) = 1 and a(t) >
+0 for all t ≥ 0."[^fm-notes] Wikipedia's own treatment of accumulation functions
+requires `a(0) = 1` and states no positivity condition at all,[^wikipedia-accum]
+so this is one source supplying what another omits rather than two agreeing.
+
+**Taken literally, that criterion forbids every negative rate.** For
+`a(t) = 1 + rt` with `r < 0`, positivity holds only while `t < −1/r`: at
+`r = −0.05` it fails from `t = 20` onward, and as `t` grows `1 + rt → −∞` for
+any negative `r` whatever. No negative simple rate satisfies "for all `t ≥ 0`".
+
+That cannot be the rule adopted here. Negative rates exist, and the criterion is
+written for a general `a(t)` describing an account that persists indefinitely —
+not for a formula evaluated at one horizon.
+
+**Decided — positivity is required at the horizon being computed, not for all
+horizons.** `1 + rt > 0` for the specific `t` in hand. So the constraint belongs
+to the pair and is checked where the formula is applied, not where a
+[rate](simple-interest-rate.md) or a duration is built.
+
+**This constrains the factor, not the result. `FV` may be negative.** `PV` may
+be negative — an outflow, or a liability — and `FV` is then negative too. The
+sign of `FV` is inherited entirely from `PV`; a positive factor never changes
+it. What a positive factor rules out is a multiplier that _flips_ the sign,
+turning money owed into money held by nothing but the passage of time. Requiring
+`FV > 0` would be a different and wrong rule, since it would outlaw every
+liability.
+
+This is the second property here that looks like it belongs to `r` or `t`
+separately and turns out to belong to both together — the first being the period
+they share.
+
+**Derived — the formula can fail for a reason that is not overflow.** Inputs
+each perfectly valid can be jointly meaningless, so evaluating `FV` is fallible
+on domain grounds as well as on representation grounds.
+
 # To be modelled
 
 `FV` is a function of `PV`, `r`, and `t`.
 
-`PV` and `FV` are both [Amounts](amount.md).
+`PV` and `FV` are both [Amounts](amount.md). `r` is a
+[simple interest rate](simple-interest-rate.md).
 
-How `r` and `t` are each represented is not decided.
+How `t` is represented is not decided.
 
 [^wikipedia-fv]: _Future value_, Wikipedia, revision last modified 2026-08-04.
+
+[^wikipedia-accum]:
+    _Accumulation function_, Wikipedia. Requires `a(0) = 1` and states no
+    positivity, monotonicity or continuity condition.
+
+[^fm-notes]:
+    _FM Notes, Chapter 1 — The Measurement of Interest_, course notes.
+    Secondary: it states the criteria cleanly and matches the standard
+    framework, but it is not the primary text it draws on.

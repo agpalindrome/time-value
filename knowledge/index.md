@@ -12,6 +12,8 @@ claim came from. It grows one concept at a time.
 - [Future value](concepts/future-value.md) - The value at a future date of a
   single present amount earning simple interest.
 - [Amount](concepts/amount.md) - A quantity of money located at a point in time.
+- [Simple interest rate](concepts/simple-interest-rate.md) - The rate per time
+  period at which simple interest accrues.
 
 # Principles
 
