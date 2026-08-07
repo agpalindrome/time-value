@@ -7,7 +7,7 @@ status: stable
 verified:
   - { by: human:ojhermann, at: 2026-08-07T02:37:35Z }
   - { by: human:ojhermann, at: 2026-08-07T15:13:35Z }
-generated: { by: claude/opus-5, at: 2026-08-07T15:11:05Z }
+generated: { by: claude/opus-5, at: 2026-08-07T15:33:22Z }
 sources:
   - id: wikipedia-fv
     resource: https://en.wikipedia.org/wiki/Future_value
@@ -228,6 +228,57 @@ structure that assumes one. It is a separate operation, asked for explicitly.
 This is what a test comparing a computed Amount against an expected one wants.
 Equality is the wrong instrument there, and reaching for it is the common error.
 
+# Approximate comparison is two operations, not one
+
+"Close enough" is two different questions wearing one word, and they take
+different tolerances for different reasons.
+
+**Decided — they are separate, named operations rather than one with a
+configurable tolerance.** A single parameterised comparison hides which question
+a call site is asking, and the two are not interchangeable:
+
+| question                           | tolerance                        | kind of fact                       |
+| ---------------------------------- | -------------------------------- | ---------------------------------- |
+| Is this the same sum of money?     | a minor unit — "to the penny"    | domain, and specific to a currency |
+| Did the arithmetic lose precision? | relative, or representable steps | representation                     |
+
+The first is absolute and its size is a property of the currency: `0.01` for
+USD, `1` for JPY, `0.001` for KWD. It has nothing to do with floating point. The
+second is what a test asking whether `FV` was computed correctly wants.
+
+**Decided — the settlement comparison is deferred with currency**, since its
+tolerance is a currency's minor unit and no currency is represented yet.
+
+# The numerical comparison is a hybrid, and neither pure form works
+
+**Decided — `|a − b| ≤ max(absolute, relative × max(|a|, |b|))`.** Both terms
+are load-bearing, and both failure modes they guard against are reachable here
+rather than hypothetical:
+
+- **Absolute alone breaks at scale.** Near `1e20` a single representable step is
+  roughly `16384`, so an absolute tolerance of `0.01` sits far below one step
+  and the comparison silently degenerates into exact equality — rejecting values
+  that are already as close as the representation permits.
+- **Relative alone breaks at zero.** Comparing a computed `1e-300` against an
+  exact `0` is a relative error of 1, so it always rejects. And zero is a
+  legitimate Amount: `PV = 0` gives `FV = 0` exactly, and `FV − PV` at a one-day
+  rate is a near-zero amount.
+
+Amounts legitimately span cents to trillions, so both ends are in range in
+ordinary use.
+
+**Derived — the tolerance cannot be counted only in representable steps.** That
+measure is precise and scale-free, and it is meaningful solely in binary
+floating point. Adopting it as _the_ definition would quietly narrow the
+decision that the representation is the caller's choice. It stays available as a
+way to express a tolerance, never as the only one.
+
+**Decided — no default tolerance is supplied.** A tolerance is a judgement about
+what error is acceptable, and this library cannot know whether a caller is
+reconciling a ledger or checking that a solve converged. The caller names it.
+That costs one argument and prevents a silently wrong answer, which is the trade
+made everywhere else here.
+
 # The representation is a parameter
 
 **Decided — which numeric representation carries an Amount is the caller's
@@ -321,10 +372,6 @@ not decide them.
   until two Amounts actually meet, which no operation here yet does. Neither is
   an Amount: a currency is a unit and carries no magnitude, and a rate is a
   quantity whose dimension is a ratio of two units.
-- What tolerance the approximate comparison uses — absolute, relative, or
-  measured in representable steps. Each is right for a different range, and the
-  answer depends on the representation and on what the tests actually need.
-  Deferred until there is something to compare.
 - How an Amount renders. Tied to the absent rounding rule above: a rendering
   that shows two decimal places has chosen one, whether or not it says so.
 
