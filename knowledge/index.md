@@ -16,6 +16,8 @@ claim came from. It grows one concept at a time.
   period at which simple interest accrues.
 - [Elapsed periods](concepts/elapsed-periods.md) - A length of time counted in
   the periods a rate is stated against.
+- [Simple accumulation factor](concepts/simple-accumulation-factor.md) - The
+  dimensionless multiplier by which simple interest grows an amount over a span.
 
 # Principles
 

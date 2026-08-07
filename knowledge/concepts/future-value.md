@@ -6,7 +6,7 @@ description:
 tags: [simple-interest]
 status: stable
 verified: { by: human:ojhermann, at: 2026-08-07T02:37:35Z }
-generated: { by: claude/opus-5, at: 2026-08-07T16:09:41Z }
+generated: { by: claude/opus-5, at: 2026-08-07T16:15:56Z }
 sources:
   - id: wikipedia-fv
     resource: https://en.wikipedia.org/wiki/Future_value
@@ -144,17 +144,43 @@ they share.
 each perfectly valid can be jointly meaningless, so evaluating `FV` is fallible
 on domain grounds as well as on representation grounds.
 
-# To be modelled
+# The shape of the operation
+
+**Decided — two steps, because the two failures separate onto them.** Build a
+[simple accumulation factor](simple-accumulation-factor.md) from `r` and `t`,
+which fails only when `1 + rt ≤ 0`; then apply it to a `PV`, which fails only
+when the result overflows. One step, one cause. As a single expression the
+operation would carry two unrelated failures for a caller to tell apart.
+
+**Decided — a one-call form exists as well.** The common path is a one-liner and
+should read like one; it reports whichever failure occurred.
+
+**No role tags are needed.** [Amount](amount.md),
+[simple interest rate](simple-interest-rate.md) and
+[elapsed periods](elapsed-periods.md) are three distinct kinds, so no two
+arguments can be transposed. That protection is already paid for by the
+distinctions drawn between them, and adding tags on top would be ceremony.
+
+**The result is an Amount**, in `PV`'s unit, produced fallibly.
+
+# What is modelled
 
 `FV` is a function of `PV`, `r`, and `t`.
 
 `PV` and `FV` are both [Amounts](amount.md), `r` is a
-[simple interest rate](simple-interest-rate.md), and `t` is a count of
-[elapsed periods](elapsed-periods.md).
+[simple interest rate](simple-interest-rate.md), `t` is a count of
+[elapsed periods](elapsed-periods.md), and `(1 + rt)` is a
+[simple accumulation factor](simple-accumulation-factor.md).
 
-Every quantity in the formula now has a concept. What remains is the shape of
-the operation itself — how it is called, and how it reports the two ways it can
-fail.
+Every quantity in the formula has a concept, and the operation has a shape. What
+remains is to write it.
+
+# Not yet modelled
+
+- **Discounting** — `PV = FV / (1 + rt)`, the inverse. Its own operation, taking
+  a non-negative `t`, rather than an overload of this one.
+- **Solving for `r` or for `t`** — both recovered from `FV/PV`, which is the
+  accumulation factor arrived at from the other direction.
 
 [^wikipedia-fv]: _Future value_, Wikipedia, revision last modified 2026-08-04.
 
