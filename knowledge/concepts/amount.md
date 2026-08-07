@@ -8,7 +8,7 @@ verified:
   - { by: human:ojhermann, at: 2026-08-07T02:37:35Z }
   - { by: human:ojhermann, at: 2026-08-07T15:13:35Z }
   - { by: human:ojhermann, at: 2026-08-07T15:40:47Z }
-generated: { by: claude/opus-5, at: 2026-08-07T15:50:27Z }
+generated: { by: claude/opus-5, at: 2026-08-07T16:40:25Z }
 sources:
   - id: wikipedia-fv
     resource: https://en.wikipedia.org/wiki/Future_value
@@ -231,6 +231,14 @@ structure that assumes one. It is a separate operation, asked for explicitly.
 
 This is what a test comparing a computed Amount against an expected one wants.
 Equality is the wrong instrument there, and reaching for it is the common error.
+
+**Measured 2026-08-07 — the toolchain enforces this independently.** Clippy's
+`float_cmp` fires on `assert_eq!` between two binary floats inside a `#[test]`,
+and under a denied `pedantic` group that is a hard error, not a warning. The
+`allow-*-in-tests` options in `clippy.toml` have no member covering it, so the
+usual test exemptions do not apply. A test suite for this library therefore
+cannot reach for equality even by accident — a lint arrived at the same
+conclusion as the reasoning above, from an entirely different direction.
 
 # Approximate comparison is two operations, not one
 

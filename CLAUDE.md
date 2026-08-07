@@ -84,7 +84,7 @@ Everything CI runs, in the order CI runs it:
 nix develop -c cargo fmt --all -- --check
 nix develop -c prettier --check "**/*.md"
 nix develop -c cargo clippy --workspace --all-targets --locked
-nix develop -c cargo nextest run --workspace --locked --no-tests=pass
+nix develop -c cargo nextest run --workspace --locked
 nix develop -c cargo test --doc --workspace --locked
 nix develop -c cargo doc -p time_value --no-deps --locked
 nix develop -c cargo deny check all
@@ -102,9 +102,6 @@ nix run ~/okf-tools#okf-graph -- knowledge
 That is **not** in CI and not in the devshell — it runs from a sibling repo's
 flake, so nothing stops a malformed bundle merging. Issue #136 tracks fixing
 that once `okf-graph` is a crate.
-
-`--no-tests=pass` is there only because the crate is empty. **Remove it with the
-first real test**; nextest failing on zero tests is the check working.
 
 ## CI and releases
 
