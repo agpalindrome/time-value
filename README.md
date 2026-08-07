@@ -32,21 +32,16 @@ nix develop           # toolchain, bacon, nextest, cargo-deny, prettier, hooks
 bacon                 # continuous clippy
 ```
 
-Everything CI runs, runs the same way locally:
+Everything CI runs, runs the same way locally — CI runs this exact script:
 
 ```sh
-nix develop -c cargo fmt --all -- --check
-nix develop -c prettier --check "**/*.md"
-nix develop -c cargo clippy --workspace --all-targets --locked
-nix develop -c cargo nextest run --workspace --locked
-nix develop -c cargo test --doc --workspace --locked
-nix develop -c cargo doc -p time_value --no-deps --locked
-nix develop -c cargo deny check all
+nix develop -c ./scripts/check.sh            # everything
+nix develop -c ./scripts/check.sh clippy     # one check, by name
 ```
 
-Run all of them. Three are silent no-ops if skipped: `cargo test --doc` (nextest
-does not run doc tests), `cargo doc` (every `[lints.rustdoc]` entry is otherwise
-inert), and `cargo deny`.
+It reports every check rather than stopping at the first failure, and refuses to
+run against a stable `rustfmt`, which would silently ignore most of
+`rustfmt.toml` and pass anyway.
 
 Changes to `knowledge/` are validated separately, from `okf-tools`' own flake:
 

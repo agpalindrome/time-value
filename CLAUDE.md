@@ -94,30 +94,30 @@ scaffolding anything new. What is load-bearing here:
 
 ## Verification
 
-Everything CI runs, in the order CI runs it:
-
 ```sh
-nix develop -c cargo fmt --all -- --check
-nix develop -c prettier --check "**/*.md"
-nix develop -c cargo clippy --workspace --all-targets --locked
-nix develop -c cargo nextest run --workspace --locked
-nix develop -c cargo test --doc --workspace --locked
-nix develop -c cargo doc -p time_value --no-deps --locked
-nix develop -c cargo deny check all
+nix develop -c ./scripts/check.sh            # everything CI runs
+nix develop -c ./scripts/check.sh clippy     # one check, by name
 ```
 
-Run all of them. Three are silent no-ops if skipped — `cargo test --doc`,
-`cargo doc`, and `cargo deny`.
+`scripts/check.sh` is the **only** definition of what must pass; CI runs the
+same script. Do not restate the list here or in the README — a list in two
+places is a list that goes stale in one of them, which is how the markdown check
+once ran in CI while the docs described six checks and not seven.
 
-**And validate the bundle after touching `knowledge/`:**
+It runs every check and reports each, rather than stopping at the first failure.
+It also refuses to run against a stable `rustfmt`: most of `rustfmt.toml` is
+nightly-only and stable ignores it silently, so that would be a pass which
+verified almost nothing.
+
+**Validate the bundle separately after touching `knowledge/`:**
 
 ```sh
 nix run ~/okf-tools#okf-graph -- knowledge
 ```
 
-That is **not** in CI and not in the devshell — it runs from a sibling repo's
-flake, so nothing stops a malformed bundle merging. Issue #136 tracks fixing
-that once `okf-graph` is a crate.
+That is not in the script and not in CI — it runs from a sibling repo's flake,
+so nothing stops a malformed bundle merging. Issue #136 tracks folding it in
+once `okf-graph` is a crate.
 
 ## CI and releases
 
