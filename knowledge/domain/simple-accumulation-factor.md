@@ -4,7 +4,7 @@ title: Simple accumulation factor
 description:
   The dimensionless multiplier by which simple interest grows an amount over a
   span.
-tags: [simple-interest, accumulation]
+tags: [simple-interest, numerics]
 status: stable
 verified: { by: human:ojhermann, at: 2026-08-07T16:20:15Z }
 generated: { by: claude/opus-5, at: 2026-08-07T17:36:18Z }
@@ -38,7 +38,7 @@ here, not something the formula hands over.
 
 Whether it is the right cut becomes answerable when `(1 + i)^n` appears beside
 it, and not before — see
-[the bundle is revisable](the-bundle-is-revisable.md#decompositions-are-guesses-until-a-second-instance-exists).
+[the bundle is revisable](../principles/the-bundle-is-revisable.md#decompositions-are-guesses-until-a-second-instance-exists).
 
 # Why it exists as a thing rather than an expression
 
@@ -55,7 +55,7 @@ one way.**
 Written as a single expression, one operation carries unrelated failures and a
 caller has to disentangle which occurred. Split, each step carries a set with a
 common remedy — see
-[failures are classified by remedy](failures-are-classified-by-remedy.md).
+[failures are classified by remedy](../principles/failures-are-classified-by-remedy.md).
 
 **This table is a correction.** It first read that each step fails _exactly one
 way_ — build on domain grounds, apply on representation grounds — and called
@@ -71,9 +71,9 @@ one-to-one the first version claimed.
 **Derived — positivity becomes an invariant instead of a check.** Because the
 factor is constructed and validated, `1 + rt > 0` holds for every factor that
 exists, which is rung 2 of
-[illegal states are unrepresentable](illegal-states-unrepresentable.md). Left
-inside the formula it would be a runtime check re-run per call and easy to omit
-in the next formula needing it.
+[illegal states are unrepresentable](../principles/illegal-states-unrepresentable.md).
+Left inside the formula it would be a runtime check re-run per call and easy to
+omit in the next formula needing it.
 
 **Derived — it is also what inversion produces.** `FV/PV` is
 [Amount ÷ Amount](amount.md#arithmetic), a dimensionless quantity, and it _is_

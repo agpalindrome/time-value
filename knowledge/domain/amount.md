@@ -2,7 +2,7 @@
 type: Quantity
 title: Amount
 description: A quantity of money located at a point in time.
-tags: [money, quantity]
+tags: [money, numerics]
 status: stable
 verified:
   - { by: human:ojhermann, at: 2026-08-07T02:37:35Z }
@@ -438,9 +438,9 @@ nothing a named method does not.
 
 # How this Concept satisfies the standing rule
 
-[Illegal states are unrepresentable](illegal-states-unrepresentable.md) applies
-here, at rung 2 of its ladder: a representation's non-values exist and cannot be
-removed by any type discipline, so **an Amount holding one must not be
+[Illegal states are unrepresentable](../principles/illegal-states-unrepresentable.md)
+applies here, at rung 2 of its ladder: a representation's non-values exist and
+cannot be removed by any type discipline, so **an Amount holding one must not be
 constructible.** Construction validates and can fail, and no path skips it.
 
 This gives the private magnitude required in

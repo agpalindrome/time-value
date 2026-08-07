@@ -4,7 +4,7 @@ title: The bundle is revisable
 description:
   Content, structure and decomposition all change as understanding improves;
   none of it is settled by having been written.
-tags: [design, standing-rule]
+tags: [standing-rule, process]
 status: draft
 generated: { by: claude/opus-5, at: 2026-08-07T16:20:15Z }
 ---
@@ -32,10 +32,10 @@ one concept and that is another.
 
 A decomposition drawn from a single example is a guess about a shape not yet
 seen twice. It usually only becomes testable when a second instance arrives:
-[the simple accumulation factor](simple-accumulation-factor.md) exists as a
-concept because `(1 + rt)` looked like a thing in its own right, and whether it
-was the right cut becomes answerable when `(1 + i)^n` appears beside it, not
-before.
+[the simple accumulation factor](../domain/simple-accumulation-factor.md) exists
+as a concept because `(1 + rt)` looked like a thing in its own right, and
+whether it was the right cut becomes answerable when `(1 + i)^n` appears beside
+it, not before.
 
 So a decomposition being revised later is the process working, not a defect in
 the earlier reasoning.

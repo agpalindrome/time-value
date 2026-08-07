@@ -4,7 +4,7 @@ title: A claim earns a test
 description:
   Anything this bundle asserts about implemented behaviour has a test that fails
   when the code stops honouring it.
-tags: [design, standing-rule, testing]
+tags: [standing-rule, testing]
 status: draft
 generated: { by: claude/opus-5, at: 2026-08-07T17:53:00Z }
 ---
@@ -68,7 +68,7 @@ member covering it. Measured 2026-08-07.
 
 So a test comparing a computed amount against an expected one states its
 tolerance explicitly, and states both halves of it — see
-[Amount](amount.md#approximate-comparison-is-two-operations-not-one).
+[Amount](../domain/amount.md#approximate-comparison-is-two-operations-not-one).
 
 # Limits
 

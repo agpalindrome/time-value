@@ -2,7 +2,7 @@
 type: Quantity
 title: Simple interest rate
 description: The rate per time period at which simple interest accrues.
-tags: [simple-interest, rate]
+tags: [simple-interest]
 status: stable
 verified: { by: human:ojhermann, at: 2026-08-07T16:20:15Z }
 generated: { by: claude/opus-5, at: 2026-08-07T16:02:06Z }
@@ -38,8 +38,8 @@ the formula.
 of number, and `5` is a legal rate of 500%, so a validating constructor cannot
 reject it and a distinct type cannot tell the two apart. It is the one hazard in
 this Concept that
-[illegal states are unrepresentable](illegal-states-unrepresentable.md) cannot
-reach, and the error is a silent factor of one hundred.
+[illegal states are unrepresentable](../principles/illegal-states-unrepresentable.md)
+cannot reach, and the error is a silent factor of one hundred.
 
 **Decided — the mitigation is a separate, named way in.** A construction from a
 percentage, distinct from construction from a fraction, so the call site states
