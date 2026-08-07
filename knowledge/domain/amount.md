@@ -9,7 +9,7 @@ verified:
   - { by: human:ojhermann, at: 2026-08-07T15:13:35Z }
   - { by: human:ojhermann, at: 2026-08-07T15:40:47Z }
   - { by: human:ojhermann, at: 2026-08-07T18:50:30Z }
-generated: { by: claude/opus-5, at: 2026-08-07T18:56:06Z }
+generated: { by: claude/opus-5, at: 2026-08-07T19:00:08Z }
 sources:
   - id: wikipedia-fv
     resource: https://en.wikipedia.org/wiki/Future_value
@@ -488,5 +488,29 @@ Everything else once parked here has collapsed into that one question. A
 currency's minor unit is what supplies a settlement tolerance and a rounded
 rendering's place count alike, so both wait on the same answer and neither is
 needed before it.
+
+## What the currency work must revisit
+
+Recorded here rather than only where each was decided, because this section is
+where that work starts and a trigger nobody finds is not a trigger.
+
+- **The read accessor.** It returns the whole value today and a value stripped
+  of its unit the moment a currency exists, while every call site goes on
+  compiling. Rename it then, to something that reads wrong at a call site doing
+  arithmetic with it. See
+  [both readings](#both-readings-of-same-unit-stay-admissible).
+- **Ordering.** Already `PartialOrd` and deliberately not a total order, so
+  nothing needs withdrawing — but the day a currency lands is the day the
+  comparison must start returning "these do not compare" rather than an answer.
+  See [order holds within a unit](#order-holds-within-a-unit-not-across-units).
+- **What an absent currency means when it meets a named one.** Decided already —
+  it is not silently resolved — but the mechanism is not built, and it is the
+  first thing the representation has to express. See
+  [an absent currency](#an-absent-currency-means-unrecorded-never-unitless).
+- **Equality.** It survives unchanged and should be checked rather than assumed:
+  including the unit keeps it total, because "are these the same?" has an answer
+  across currencies where "which is larger?" does not.
+- **The settlement comparison and the rounded rendering**, both of which take a
+  currency's minor unit as their parameter and are deferred on exactly that.
 
 [^wikipedia-fv]: _Future value_, Wikipedia, revision last modified 2026-08-04.
