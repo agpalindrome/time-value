@@ -6,8 +6,8 @@ A Cargo workspace whose published crate is [`time_value`](crates/time_value).
 
 ## Status
 
-Foundations only. The toolchain, lints, supply-chain checks and dev shell are
-in place; no library code is written yet, and nothing is published — the
+Foundations only. The toolchain, lints, supply-chain checks and dev shell are in
+place; no library code is written yet, and nothing is published — the
 `0.1.0`–`0.8.0` series on crates.io is a separate, immutable history this line
 does not continue.
 

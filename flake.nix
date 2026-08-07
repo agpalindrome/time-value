@@ -58,6 +58,10 @@
                 files = "\\.rs$";
                 pass_filenames = false;
               };
+              prettier = {
+                enable = true;
+                files = "\\.md$";
+              };
               nixfmt.enable = true;
               typos.enable = true;
               trim-trailing-whitespace.enable = true;
@@ -99,6 +103,7 @@
               pkgs.cargo-nextest
               pkgs.cargo-deny
               pkgs.nixfmt
+              pkgs.prettier
             ];
             buildInputs =
               env.preCommit.enabledPackages ++ nixpkgs.lib.optionals pkgs.stdenv.isDarwin [ pkgs.libiconv ];

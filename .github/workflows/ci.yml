@@ -38,6 +38,10 @@ jobs:
       - name: Format
         run: nix develop -c cargo fmt --all -- --check
 
+      # Prose wraps at 80; tables are exempt because markdown cannot wrap cells.
+      - name: Format (markdown)
+        run: nix develop -c prettier --check "**/*.md"
+
       # No `-D warnings`: levels are set in Cargo.toml, so the CI verdict and the
       # local verdict are the same.
       - name: Clippy
