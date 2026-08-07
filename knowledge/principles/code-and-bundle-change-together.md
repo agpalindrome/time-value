@@ -5,7 +5,8 @@ description:
   Any change to one asks what it means for the other, and anything learned asks
   whether it is a lesson rather than a local fix.
 tags: [standing-rule, process]
-status: draft
+status: stable
+verified: { by: human:ojhermann, at: 2026-08-07T18:50:30Z }
 generated: { by: claude/opus-5, at: 2026-08-07T18:07:58Z }
 ---
 

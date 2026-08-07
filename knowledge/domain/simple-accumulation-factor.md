@@ -6,7 +6,9 @@ description:
   span.
 tags: [simple-interest, numerics]
 status: stable
-verified: { by: human:ojhermann, at: 2026-08-07T16:20:15Z }
+verified:
+  - { by: human:ojhermann, at: 2026-08-07T16:20:15Z }
+  - { by: human:ojhermann, at: 2026-08-07T18:50:30Z }
 generated: { by: claude/opus-5, at: 2026-08-07T17:36:18Z }
 sources:
   - id: wikipedia-accum

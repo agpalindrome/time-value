@@ -5,7 +5,8 @@ description:
   Anything this bundle asserts about implemented behaviour has a test that fails
   when the code stops honouring it.
 tags: [standing-rule, testing]
-status: draft
+status: stable
+verified: { by: human:ojhermann, at: 2026-08-07T18:50:30Z }
 generated: { by: claude/opus-5, at: 2026-08-07T17:53:00Z }
 ---
 

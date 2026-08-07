@@ -5,7 +5,8 @@ description:
   Content, structure and decomposition all change as understanding improves;
   none of it is settled by having been written.
 tags: [standing-rule, process]
-status: draft
+status: stable
+verified: { by: human:ojhermann, at: 2026-08-07T18:50:30Z }
 generated: { by: claude/opus-5, at: 2026-08-07T16:20:15Z }
 ---
 
