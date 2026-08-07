@@ -8,7 +8,7 @@ verified:
   - { by: human:ojhermann, at: 2026-08-07T02:37:35Z }
   - { by: human:ojhermann, at: 2026-08-07T15:13:35Z }
   - { by: human:ojhermann, at: 2026-08-07T15:40:47Z }
-generated: { by: claude/opus-5, at: 2026-08-07T15:38:55Z }
+generated: { by: claude/opus-5, at: 2026-08-07T15:50:27Z }
 sources:
   - id: wikipedia-fv
     resource: https://en.wikipedia.org/wiki/Future_value
@@ -68,9 +68,12 @@ argument, read from a record, received over a wire. A type-level tag cannot
 express something unknown until run time, so it would serve hand-written models
 and fail every interface that accepts input.
 
-The _period_ shared by `r` and `t` will want the opposite answer for the
-opposite reason — a period is fixed when a model is written, which makes it a
-candidate for a type-level tag. The two questions look alike and are not.
+The _period_ shared by `r` and `t` was recorded here as the opposite case — a
+period being fixed when a model is written, and so a candidate for a type-level
+tag. **That was too strong.** A command line takes a period as an argument and a
+wire protocol takes it as a field, exactly as either does a currency, so the
+same objection applies to both. The two questions turned out to be alike after
+all. See [future value](future-value.md), where the period is settled.
 
 # An absent currency means unrecorded, never unitless
 
