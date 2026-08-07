@@ -1,6 +1,6 @@
 //! A length of time, counted in the periods a rate is stated against.
 
-use crate::error::{Error, Result};
+use crate::error::{Error, Quantity, Result};
 
 /// How much time has elapsed, counted in the periods the rate is stated
 /// against.
@@ -38,11 +38,17 @@ impl ElapsedPeriods {
     /// accumulation is division, not evaluation at a negative argument, so a
     /// negative span would answer a different question than the one asked.
     pub fn new(count: f64) -> Result<Self> {
-        if !count.is_finite() {
-            return Err(Error::NotFinite);
-        }
+        // Sign before range: negative infinity is negative, which is the domain
+        // failure this variant exists to name. Reporting it as out-of-range
+        // would send a caller to a remedy that cannot help. NaN is not less
+        // than zero, so it falls through to the range check.
         if count < 0.0 {
             return Err(Error::NegativePeriods { periods: count });
+        }
+        if !count.is_finite() {
+            return Err(Error::NotFinite {
+                quantity: Quantity::Periods,
+            });
         }
         Ok(Self(count))
     }
@@ -57,7 +63,7 @@ impl ElapsedPeriods {
 #[cfg(test)]
 mod tests {
     use super::ElapsedPeriods;
-    use crate::error::Error;
+    use crate::error::{Error, Quantity};
 
     #[test]
     fn admits_fractional_spans() {
@@ -82,7 +88,20 @@ mod tests {
     #[test]
     fn refuses_non_values() {
         for count in [f64::NAN, f64::INFINITY] {
-            assert!(matches!(ElapsedPeriods::new(count), Err(Error::NotFinite)));
+            assert!(matches!(
+                ElapsedPeriods::new(count),
+                Err(Error::NotFinite {
+                    quantity: Quantity::Periods
+                })
+            ));
         }
+    }
+
+    #[test]
+    fn negative_infinity_is_a_domain_failure_not_a_range_one() {
+        // It is negative, which is knowable, and no wider representation makes
+        // it non-negative. The two rules race here and the sign must win.
+        let error = ElapsedPeriods::new(f64::NEG_INFINITY).expect_err("negative is refused");
+        assert!(matches!(error, Error::NegativePeriods { .. }), "{error:?}");
     }
 }

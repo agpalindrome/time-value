@@ -4,7 +4,8 @@
 //! change to the public surface, because it can reach past it.
 
 use time_value::{
-    Amount, ElapsedPeriods, Error, SimpleAccumulationFactor, SimpleInterestRate, future_value,
+    Amount, ElapsedPeriods, Error, Quantity, SimpleAccumulationFactor, SimpleInterestRate,
+    Tolerance, future_value,
 };
 
 /// Values chosen to be awkward: the boundaries, the classic binary-float
@@ -20,11 +21,16 @@ fn awkward_magnitudes() -> Vec<f64> {
         1.0 / 3.0,
         1e-300,
         f64::MIN_POSITIVE,
+        5e-324,
         1e20,
         f64::MAX,
         -f64::MAX,
         123_456_789.987_654_32,
     ]
+}
+
+fn near() -> Tolerance {
+    Tolerance::relative(1e-9).expect("a valid tolerance")
 }
 
 #[test]
@@ -65,7 +71,8 @@ fn the_two_failures_are_told_apart_through_the_public_api() {
         "{domain}"
     );
 
-    // A valid factor whose application does not fit: a representation failure.
+    // A valid factor whose application does not fit: a representation failure,
+    // and it names which quantity overflowed.
     let doubling = SimpleAccumulationFactor::new(
         SimpleInterestRate::from_fraction(1.0).expect("valid"),
         ElapsedPeriods::new(1.0).expect("valid"),
@@ -75,9 +82,36 @@ fn the_two_failures_are_told_apart_through_the_public_api() {
         .apply(Amount::new(f64::MAX).expect("valid"))
         .expect_err("2 * MAX does not fit");
     assert!(
-        matches!(representation, Error::NotFinite),
+        matches!(
+            representation,
+            Error::NotFinite {
+                quantity: Quantity::Product,
+                ..
+            }
+        ),
         "{representation}"
     );
+}
+
+#[test]
+fn a_rate_written_two_ways_gets_one_answer() {
+    // The sharpest defect the adversarial review found: these are the same
+    // modelling intent one ulp apart, and the library used to accept the first
+    // and refuse the second — returning, for a million, a fraction of a
+    // nanocent, with no signal.
+    let periods = ElapsedPeriods::new(12.0).expect("valid");
+    let as_fraction = future_value(
+        Amount::new(1_000_000.0).expect("valid"),
+        SimpleInterestRate::from_fraction(-1.0 / 12.0).expect("valid"),
+        periods,
+    );
+    let as_percent = future_value(
+        Amount::new(1_000_000.0).expect("valid"),
+        SimpleInterestRate::from_percent(-100.0 / 12.0).expect("valid"),
+        periods,
+    );
+    as_fraction.expect_err("the sign here is only rounding error");
+    as_percent.expect_err("the sign here is only rounding error");
 }
 
 #[test]
@@ -92,7 +126,22 @@ fn a_worked_example_from_the_source() {
     .expect("valid");
 
     let expected = Amount::new(115.0).expect("valid");
-    assert!(future.is_close(expected, 1e-9, 1e-9), "got {future}");
+    assert!(future.is_close(expected, near()), "got {future}");
+}
+
+#[test]
+fn a_tolerance_cannot_be_transposed_or_malformed() {
+    // The two terms are not interchangeable and a swap changes the answer, so
+    // each is named at the call site rather than positioned.
+    let computed = Amount::new(1e-9).expect("valid");
+    let zero = Amount::new(0.0).expect("valid");
+    assert!(computed.is_close(zero, Tolerance::absolute(1e-6).expect("valid")));
+    assert!(!computed.is_close(zero, Tolerance::relative(1e-6).expect("valid")));
+
+    // And a tolerance is validated, so it cannot answer under a value the
+    // caller never supplied.
+    Tolerance::absolute(f64::NAN).expect_err("NaN is refused");
+    Tolerance::relative(-1.0).expect_err("negative is refused");
 }
 
 #[test]

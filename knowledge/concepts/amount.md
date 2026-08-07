@@ -8,7 +8,7 @@ verified:
   - { by: human:ojhermann, at: 2026-08-07T02:37:35Z }
   - { by: human:ojhermann, at: 2026-08-07T15:13:35Z }
   - { by: human:ojhermann, at: 2026-08-07T15:40:47Z }
-generated: { by: claude/opus-5, at: 2026-08-07T16:40:25Z }
+generated: { by: claude/opus-5, at: 2026-08-07T17:36:18Z }
 sources:
   - id: wikipedia-fv
     resource: https://en.wikipedia.org/wiki/Future_value
@@ -211,11 +211,18 @@ bits — `PV(1 + rt)` against `PV + PV·rt` is exactly such a pair — and this
 equality calls them different. Nothing weaker is available without giving up
 more than it buys.
 
-**Derived — barring non-values makes equality reflexive, and so total.** NaN is
-the only binary floating-point value unequal to itself. Having excluded it, an
-Amount carries full equality and a total order rather than the partial forms
-floating point normally forces, which is what makes sorting, deduplication and
-use as a key available at all.
+**Derived — barring non-values makes equality reflexive.** NaN is the only
+binary floating-point value unequal to itself, so excluding it gives an Amount
+full equality rather than the partial form floating point normally forces.
+
+This was first written as also yielding a _total order_, and as making "sorting,
+deduplication and use as a key available at all". Both were too strong.
+[Ordering holds within a unit and not across](#order-holds-within-a-unit-not-across-units),
+so a total order is a promise this bundle has already declined to make — and
+hash-keyed use needs a hash that agrees with equality, which means one that maps
+negative zero and zero together, since they are equal here. Ordered collections
+work; hashed ones need that hash written deliberately, and a derived one would
+be wrong.
 
 **Derived — the order must be the one that agrees with equality.** The obvious
 tool for totally ordering binary floats places negative zero below zero, while

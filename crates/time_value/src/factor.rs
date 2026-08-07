@@ -1,7 +1,11 @@
 //! The multiplier by which simple interest grows an amount over a span.
 
 use crate::{
-    amount::Amount, error::Result, periods::ElapsedPeriods, rate::SimpleInterestRate, simple,
+    amount::Amount,
+    error::{Error, Quantity, Result},
+    periods::ElapsedPeriods,
+    rate::SimpleInterestRate,
+    simple,
 };
 
 /// The accumulation factor `1 + rt`, for simple interest.
@@ -18,6 +22,7 @@ use crate::{
 /// ```
 /// use time_value::{
 ///     Amount, ElapsedPeriods, SimpleAccumulationFactor, SimpleInterestRate,
+///     Tolerance,
 /// };
 ///
 /// let rate = SimpleInterestRate::from_percent(5.0)?;
@@ -25,7 +30,7 @@ use crate::{
 ///
 /// let factor = SimpleAccumulationFactor::new(rate, periods)?;
 /// let future = factor.apply(Amount::new(100.0)?)?;
-/// assert!(future.is_close(Amount::new(115.0)?, 1e-9, 1e-9));
+/// assert!(future.is_close(Amount::new(115.0)?, Tolerance::relative(1e-9)?));
 /// # Ok::<(), time_value::Error>(())
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -37,17 +42,19 @@ impl Eq for SimpleAccumulationFactor {}
 impl SimpleAccumulationFactor {
     /// Builds the factor `1 + rt`.
     ///
-    /// This is the step that can fail on **domain** grounds, and the only one.
+    /// This is the step that carries the **domain** failures. It can also fail
+    /// on representation grounds, which the concepts originally said it could
+    /// not — see the note on the type.
     ///
     /// # Errors
     ///
-    /// [`Error::NonPositiveFactor`](crate::error::Error::NonPositiveFactor)
+    /// [`Error::NonPositiveFactor`]
     /// when `1 + rt` is not strictly positive. Both arguments are
     /// individually valid — the failure is in the pair. Such a factor would
     /// flip the sign of whatever it multiplied, turning money
     /// held into money owed by nothing but elapsed time.
     ///
-    /// [`Error::NotFinite`](crate::error::Error::NotFinite) if the factor
+    /// [`Error::NotFinite`] if the factor
     /// itself leaves the representable range.
     pub fn new(rate: SimpleInterestRate, periods: ElapsedPeriods) -> Result<Self> {
         simple::accumulation_factor(rate.as_fraction(), periods.count()).map(Self)
@@ -55,9 +62,8 @@ impl SimpleAccumulationFactor {
 
     /// Applies the factor to an amount, giving its value after the span.
     ///
-    /// This is the step that can fail on **representation** grounds, and the
-    /// only one. A factor is already known to be valid; what remains is whether
-    /// the product fits.
+    /// A factor is already known to be valid; what remains is whether the
+    /// product fits — at either end of the range.
     ///
     /// The result carries the sign of `present_value`: a liability accumulates
     /// into a larger liability, and a positive factor never turns one into an
@@ -65,10 +71,23 @@ impl SimpleAccumulationFactor {
     ///
     /// # Errors
     ///
-    /// [`Error::NotFinite`](crate::error::Error::NotFinite) if the product
-    /// leaves the representable range.
+    /// [`Error::NotFinite`] if the product
+    /// overflows, and [`Error::Underflow`] if a
+    /// non-zero amount shrinks to zero. The second matters because it is
+    /// otherwise silent: an underflowed liability stops comparing as one, so
+    /// the guarantee above about carrying the sign would quietly stop holding.
     pub fn apply(self, present_value: Amount) -> Result<Amount> {
-        Amount::new(present_value.magnitude() * self.0)
+        let magnitude = present_value.magnitude();
+        let product = magnitude * self.0;
+        if !product.is_finite() {
+            return Err(Error::NotFinite {
+                quantity: Quantity::Product,
+            });
+        }
+        if product == 0.0 && magnitude != 0.0 {
+            return Err(Error::Underflow);
+        }
+        Amount::new(product)
     }
 
     /// The factor, as a number.
@@ -93,7 +112,7 @@ impl SimpleAccumulationFactor {
 ///
 /// ```
 /// use time_value::{
-///     Amount, ElapsedPeriods, SimpleInterestRate, future_value,
+///     Amount, ElapsedPeriods, SimpleInterestRate, Tolerance, future_value,
 /// };
 ///
 /// let future = future_value(
@@ -101,7 +120,7 @@ impl SimpleAccumulationFactor {
 ///     SimpleInterestRate::from_percent(5.0)?,
 ///     ElapsedPeriods::new(3.0)?,
 /// )?;
-/// assert!(future.is_close(Amount::new(115.0)?, 1e-9, 1e-9));
+/// assert!(future.is_close(Amount::new(115.0)?, Tolerance::relative(1e-9)?));
 /// # Ok::<(), time_value::Error>(())
 /// ```
 ///
@@ -129,7 +148,13 @@ pub fn future_value(
 #[cfg(test)]
 mod tests {
     use super::{SimpleAccumulationFactor, future_value};
-    use crate::{amount::Amount, error::Error, periods::ElapsedPeriods, rate::SimpleInterestRate};
+    use crate::{
+        amount::Amount,
+        error::{Error, Quantity},
+        periods::ElapsedPeriods,
+        rate::SimpleInterestRate,
+        tolerance::Tolerance,
+    };
 
     fn rate(fraction: f64) -> SimpleInterestRate {
         SimpleInterestRate::from_fraction(fraction).expect("a finite rate")
@@ -141,6 +166,10 @@ mod tests {
 
     fn amount(magnitude: f64) -> Amount {
         Amount::new(magnitude).expect("a finite amount")
+    }
+
+    fn near() -> Tolerance {
+        Tolerance::relative(1e-9).expect("a valid tolerance")
     }
 
     #[test]
@@ -162,6 +191,31 @@ mod tests {
     }
 
     #[test]
+    fn refuses_a_factor_that_is_only_rounding_error() {
+        // -1/12 over 12 periods is exactly zero in real arithmetic, and what
+        // survives in binary floating point is the rounding in the stored rate.
+        // Accepting it turned a million into a fraction of a nanocent.
+        let error = SimpleAccumulationFactor::new(rate(-1.0 / 12.0), periods(12.0))
+            .expect_err("the sign here is noise");
+        assert!(
+            matches!(error, Error::IndeterminateFactor { .. }),
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn the_two_spellings_of_one_rate_agree() {
+        // These are the same modelling intent, one ulp apart. Previously the
+        // first was accepted and the second refused.
+        let from_fraction = SimpleAccumulationFactor::new(rate(-1.0 / 12.0), periods(12.0));
+        let from_percent = SimpleAccumulationFactor::new(
+            SimpleInterestRate::from_percent(-100.0 / 12.0).expect("valid"),
+            periods(12.0),
+        );
+        assert!(from_fraction.is_err() && from_percent.is_err());
+    }
+
+    #[test]
     fn the_two_failures_are_distinguishable() {
         // The whole argument for splitting the operation. A valid factor whose
         // application overflows reports a representation failure, which is a
@@ -170,17 +224,38 @@ mod tests {
         let error = factor
             .apply(amount(f64::MAX))
             .expect_err("2 * MAX overflows");
-        assert!(matches!(error, Error::NotFinite), "{error:?}");
+        assert!(
+            matches!(
+                error,
+                Error::NotFinite {
+                    quantity: Quantity::Product
+                }
+            ),
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn an_amount_that_shrinks_to_nothing_is_reported() {
+        // Otherwise silent, and it costs a liability its sign: the result is
+        // negative zero, which no longer compares as less than zero.
+        let shrink = SimpleAccumulationFactor::new(rate(-0.75), periods(1.0)).expect("0.25");
+        let error = shrink
+            .apply(amount(-f64::from_bits(1)))
+            .expect_err("the smallest subnormal shrinks away");
+        assert!(matches!(error, Error::Underflow), "{error:?}");
     }
 
     #[test]
     fn a_zero_rate_leaves_the_amount_alone() {
         let future = future_value(amount(100.0), rate(0.0), periods(7.0)).expect("valid");
-        assert!(future.is_close(amount(100.0), 1e-9, 1e-9), "{future}");
+        assert!(future.is_close(amount(100.0), near()), "{future}");
     }
 
     #[test]
     fn a_zero_amount_is_the_fixed_point() {
+        // Zero times a valid factor is zero, and that is not an underflow —
+        // nothing was lost.
         let future = future_value(amount(0.0), rate(0.05), periods(3.0)).expect("valid");
         assert_eq!(future, amount(0.0));
     }
@@ -188,7 +263,7 @@ mod tests {
     #[test]
     fn a_liability_stays_a_liability() {
         let future = future_value(amount(-100.0), rate(0.05), periods(3.0)).expect("valid");
-        assert!(future.is_close(amount(-115.0), 1e-9, 1e-9), "{future}");
+        assert!(future.is_close(amount(-115.0), near()), "{future}");
         assert!(future < amount(0.0));
     }
 
@@ -201,6 +276,31 @@ mod tests {
             .expect("valid");
         let direct = future_value(present, r, t).expect("valid");
         assert_eq!(stepwise, direct);
+    }
+
+    #[test]
+    fn the_one_call_form_reports_a_domain_failure() {
+        let error = future_value(amount(100.0), rate(-0.5), periods(3.0))
+            .expect_err("1 + rt would be -0.5");
+        assert!(
+            matches!(error, Error::NonPositiveFactor { .. }),
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn the_one_call_form_reports_a_representation_failure() {
+        let error =
+            future_value(amount(f64::MAX), rate(1.0), periods(1.0)).expect_err("2 * MAX overflows");
+        assert!(
+            matches!(
+                error,
+                Error::NotFinite {
+                    quantity: Quantity::Product
+                }
+            ),
+            "{error:?}"
+        );
     }
 
     #[test]

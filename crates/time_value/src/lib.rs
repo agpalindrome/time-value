@@ -5,6 +5,7 @@ pub mod error;
 pub mod factor;
 pub mod periods;
 pub mod rate;
+pub mod tolerance;
 
 // The arithmetic, over `f64`. Private now that the typed surface calls it: an
 // untyped API alongside the typed one would offer the same operations with none
@@ -12,7 +13,8 @@ pub mod rate;
 mod simple;
 
 pub use amount::Amount;
-pub use error::{Error, Result};
+pub use error::{Error, Quantity, Result};
 pub use factor::{SimpleAccumulationFactor, future_value};
 pub use periods::ElapsedPeriods;
 pub use rate::SimpleInterestRate;
+pub use tolerance::Tolerance;

@@ -1,6 +1,6 @@
 //! The rate per period at which simple interest accrues.
 
-use crate::error::{Error, Result};
+use crate::error::{Error, Quantity, Result};
 
 /// A simple interest rate, per time period.
 ///
@@ -44,7 +44,9 @@ impl SimpleInterestRate {
         if fraction.is_finite() {
             Ok(Self(fraction))
         } else {
-            Err(Error::NotFinite)
+            Err(Error::NotFinite {
+                quantity: Quantity::Rate,
+            })
         }
     }
 
@@ -58,8 +60,9 @@ impl SimpleInterestRate {
     ///
     /// # Errors
     ///
-    /// [`Error::NotFinite`] if `percent` is a NaN or an infinity, or if
-    /// dividing it by one hundred is.
+    /// [`Error::NotFinite`] if `percent` is a NaN or an infinity. Dividing a
+    /// finite value by one hundred cannot itself be non-finite, so that is not
+    /// a second failure.
     pub fn from_percent(percent: f64) -> Result<Self> {
         Self::from_fraction(percent / 100.0)
     }
@@ -74,7 +77,7 @@ impl SimpleInterestRate {
 #[cfg(test)]
 mod tests {
     use super::SimpleInterestRate;
-    use crate::error::Error;
+    use crate::error::{Error, Quantity};
 
     #[test]
     fn a_percentage_is_a_hundredth_of_itself() {
@@ -96,7 +99,9 @@ mod tests {
         for fraction in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
             assert!(matches!(
                 SimpleInterestRate::from_fraction(fraction),
-                Err(Error::NotFinite)
+                Err(Error::NotFinite {
+                    quantity: Quantity::Rate,
+                })
             ));
         }
     }
