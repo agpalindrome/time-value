@@ -14,17 +14,33 @@ below and one crate, `crates/time_value`, which is still empty.
 `knowledge/` is an
 [OKF](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md)
 bundle and the authoritative record of what this library knows and why. There
-are no ADRs. **Read `knowledge/index.md` before changing anything.**
+are no ADRs. **Read `knowledge/index.md` before changing anything** — it opens
+with a routing table saying which concepts a given kind of task needs.
+
+Its principles (`knowledge/principles/`) are read once and govern everything;
+its domain concepts (`knowledge/domain/`) are read per task.
 
 The order is concept, then code. A formula is modelled first — what the source
 says, what is derived from it, what is decided here, and what is left open — and
-the implementation follows the model. Code that contradicts a concept is wrong,
-or the concept is, and either way one of them changes deliberately.
+the implementation follows the model.
+
+**They change together.** Every change asks three questions, and the third is
+the one that pays:
+
+1. Code changed — what does the bundle now say that is false?
+2. A concept changed — what code now contradicts it?
+3. Something was learned — is it a **lesson**, or only a local fix? A defect is
+   usually an instance of a rule nobody wrote down, and fixing the instance
+   leaves the rule unlearned. Ask: would a rule have prevented this, and is that
+   rule recorded? If yes and no, the fix is not finished.
+
+See
+[code and bundle change together](knowledge/principles/code-and-bundle-change-together.md).
 
 Two standing rules live there rather than here, so they are linkable and
 versioned with everything they govern:
-[illegal states are unrepresentable](knowledge/concepts/illegal-states-unrepresentable.md)
-and [the bundle is revisable](knowledge/concepts/the-bundle-is-revisable.md).
+[illegal states are unrepresentable](knowledge/principles/illegal-states-unrepresentable.md)
+and [the bundle is revisable](knowledge/principles/the-bundle-is-revisable.md).
 
 ### Writing a concept
 
@@ -49,7 +65,7 @@ and [the bundle is revisable](knowledge/concepts/the-bundle-is-revisable.md).
 - **Make TVM mistakes compile errors.** The bug this domain produces is applying
   a rate of one periodicity to cashflows of another. Encode what the compiler
   can check — and note this is currently narrowed, deliberately and with the
-  reason recorded, in [future value](knowledge/concepts/future-value.md).
+  reason recorded, in [future value](knowledge/domain/future-value.md).
 - **Earn each type.** Code lands in `f64` first, with tests capturing the stated
   behaviour; types follow. A type that catches no real failure mode does not
   belong — the pressure comes from the problem, never from a design decided in
@@ -84,7 +100,7 @@ Everything CI runs, in the order CI runs it:
 nix develop -c cargo fmt --all -- --check
 nix develop -c prettier --check "**/*.md"
 nix develop -c cargo clippy --workspace --all-targets --locked
-nix develop -c cargo nextest run --workspace --locked --no-tests=pass
+nix develop -c cargo nextest run --workspace --locked
 nix develop -c cargo test --doc --workspace --locked
 nix develop -c cargo doc -p time_value --no-deps --locked
 nix develop -c cargo deny check all
@@ -102,9 +118,6 @@ nix run ~/okf-tools#okf-graph -- knowledge
 That is **not** in CI and not in the devshell — it runs from a sibling repo's
 flake, so nothing stops a malformed bundle merging. Issue #136 tracks fixing
 that once `okf-graph` is a crate.
-
-`--no-tests=pass` is there only because the crate is empty. **Remove it with the
-first real test**; nextest failing on zero tests is the check working.
 
 ## CI and releases
 

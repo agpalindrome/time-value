@@ -44,7 +44,7 @@ Everything CI runs, runs the same way locally:
 nix develop -c cargo fmt --all -- --check
 nix develop -c prettier --check "**/*.md"
 nix develop -c cargo clippy --workspace --all-targets --locked
-nix develop -c cargo nextest run --workspace --locked --no-tests=pass
+nix develop -c cargo nextest run --workspace --locked
 nix develop -c cargo test --doc --workspace --locked
 nix develop -c cargo doc -p time_value --no-deps --locked
 nix develop -c cargo deny check all

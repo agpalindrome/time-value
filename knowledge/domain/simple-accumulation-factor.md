@@ -4,10 +4,12 @@ title: Simple accumulation factor
 description:
   The dimensionless multiplier by which simple interest grows an amount over a
   span.
-tags: [simple-interest, accumulation]
+tags: [simple-interest, numerics]
 status: stable
-verified: { by: human:ojhermann, at: 2026-08-07T16:20:15Z }
-generated: { by: claude/opus-5, at: 2026-08-07T16:20:15Z }
+verified:
+  - { by: human:ojhermann, at: 2026-08-07T16:20:15Z }
+  - { by: human:ojhermann, at: 2026-08-07T18:50:30Z }
+generated: { by: claude/opus-5, at: 2026-08-07T17:36:18Z }
 sources:
   - id: wikipedia-accum
     resource: https://en.wikipedia.org/wiki/Accumulation_function
@@ -38,29 +40,42 @@ here, not something the formula hands over.
 
 Whether it is the right cut becomes answerable when `(1 + i)^n` appears beside
 it, and not before — see
-[the bundle is revisable](the-bundle-is-revisable.md#decompositions-are-guesses-until-a-second-instance-exists).
+[the bundle is revisable](../principles/the-bundle-is-revisable.md#decompositions-are-guesses-until-a-second-instance-exists).
 
 # Why it exists as a thing rather than an expression
 
 **Decided — the factor is built, then applied, and each step can fail exactly
 one way.**
 
-| step                      | fails when           | kind of failure |
-| ------------------------- | -------------------- | --------------- |
-| build it from `r` and `t` | `1 + rt ≤ 0`         | domain          |
-| apply it to an Amount     | the result overflows | representation  |
+| step                      | fails when                              | kind of failure |
+| ------------------------- | --------------------------------------- | --------------- |
+| build it from `r` and `t` | `1 + rt ≤ 0`                            | domain          |
+| build it from `r` and `t` | `1 + rt` is indistinguishable from zero | domain          |
+| build it from `r` and `t` | `1 + rt` overflows                      | representation  |
+| apply it to an Amount     | the result overflows or underflows      | representation  |
 
-Written as a single expression, one operation carries two unrelated failures and
-a caller has to disentangle which occurred. Split, each has one cause and one
-meaning. The failures separating this cleanly is the evidence the decomposition
-is real rather than merely tidy.
+Written as a single expression, one operation carries unrelated failures and a
+caller has to disentangle which occurred. Split, each step carries a set with a
+common remedy — see
+[failures are classified by remedy](../principles/failures-are-classified-by-remedy.md).
+
+**This table is a correction.** It first read that each step fails _exactly one
+way_ — build on domain grounds, apply on representation grounds — and called
+that clean split "the evidence the decomposition is real rather than merely
+tidy." Adversarial review falsified it: a finite rate and a finite span whose
+product overflows fail at the **build** step on representation grounds, and the
+implementation had always done so. The argument was overstated, and what
+survives is weaker but true — the steps separate failures by _cause_, not into
+one apiece. The decomposition still earns its place, because the domain rule
+becomes an invariant rather than a repeated check; it is simply not the tidy
+one-to-one the first version claimed.
 
 **Derived — positivity becomes an invariant instead of a check.** Because the
 factor is constructed and validated, `1 + rt > 0` holds for every factor that
 exists, which is rung 2 of
-[illegal states are unrepresentable](illegal-states-unrepresentable.md). Left
-inside the formula it would be a runtime check re-run per call and easy to omit
-in the next formula needing it.
+[illegal states are unrepresentable](../principles/illegal-states-unrepresentable.md).
+Left inside the formula it would be a runtime check re-run per call and easy to
+omit in the next formula needing it.
 
 **Derived — it is also what inversion produces.** `FV/PV` is
 [Amount ÷ Amount](amount.md#arithmetic), a dimensionless quantity, and it _is_
@@ -72,6 +87,13 @@ directions is a reasonable test of whether a type is genuine or invented.
 - **Strictly positive.** The criterion a valid accumulation function must
   satisfy.[^fm-notes] It is what stops the factor flipping the sign of what it
   multiplies, turning money held into money owed by nothing but elapsed time.
+- **Far enough from zero for its sign to mean something.** `1 + rt` is a
+  difference, so as `rt` approaches `-1` the leading digits cancel and the
+  residue is the rounding error already in the operands rather than anything the
+  caller expressed. Such a factor is positive as often as not, and would be
+  accepted and applied in silence. Refusing it costs a band of answers nobody
+  wants — a factor of `5e-17` is not a financial scenario — and buys the
+  guarantee that an accepted factor carries meaning.
 - **Exactly 1 at `t = 0`.** `a(0) = 1`, the other stated criterion,[^fm-notes]
   and the reason `FV = PV` when no time has passed.
 - **May be below 1.** A negative rate shrinks an amount, and the factor lies
@@ -85,6 +107,21 @@ accumulates by `(1 + i)^n`, which is the same kind of object reached a different
 way, and the applying half would be identical. Generalising is deferred until
 there is a second constructor to generalise over — two instances being the point
 at which the shared shape is observed rather than guessed.
+
+# Fused multiply-add is required, not incidental
+
+**Decided — the factor is computed with a single fused rounding.** Measured
+2026-08-07: `1.0 + periods * rate` rounds twice, and the intermediate rounding
+can drive a product that is merely _near_ `-1` to exactly `-1`, destroying the
+sign of the residue. The fused form rounds once and agrees with the exact sign
+of `1 + rt` — checked against a double-double reference over 216,000 pairs,
+16,000 of them adjacent to the boundary, with no disagreement.
+
+The two forms disagree about which inputs are valid for 63% of pairs near
+cancellation. So this is not a stylistic preference, and it widens the
+[operations a representation must supply](amount.md#the-representation-is-a-parameter)
+by one: a decimal representation without a fused multiply-add computes different
+answers about which inputs are legal, not merely less precise ones.
 
 # Its representation is coupled to Amount's
 

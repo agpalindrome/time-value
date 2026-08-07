@@ -4,7 +4,7 @@ title: Illegal states are unrepresentable
 description:
   A value that would be invalid should be impossible to construct, not merely
   detectable afterwards.
-tags: [design, standing-rule]
+tags: [standing-rule]
 status: stable
 verified: { by: human:ojhermann, at: 2026-08-07T02:37:35Z }
 generated: { by: claude/opus-5, at: 2026-08-07T02:21:28Z }
@@ -28,10 +28,11 @@ This library computes numbers other people act on. A wrong number that announces
 itself is a bug; a wrong number that does not is a liability, and the failure
 surfaces far from its cause.
 
-The [Amount](amount.md) case is the concrete one: NaN propagates through every
-subsequent operation without a signal, so a single invalid construction silently
-voids every result downstream of it. No amount of care at the point of _use_
-recovers that, because by then the information that something was wrong is gone.
+The [Amount](../domain/amount.md) case is the concrete one: NaN propagates
+through every subsequent operation without a signal, so a single invalid
+construction silently voids every result downstream of it. No amount of care at
+the point of _use_ recovers that, because by then the information that something
+was wrong is gone.
 
 # The ladder
 
@@ -57,8 +58,8 @@ Three things, and dropping any one of them collapses to rung 4:
   reject an input is not an invariant.
 - **There is no path around it.** Privacy is the mechanism, not a stylistic
   preference — an exposed field can be written to directly, and every guarantee
-  becomes a comment. This is why [Amount](amount.md) requires a private
-  magnitude.
+  becomes a comment. This is why [Amount](../domain/amount.md) requires a
+  private magnitude.
 - **Operations re-establish the invariant.** Where operations are partial,
   results must be validated too, so they also return something that can fail.
   The rule propagates through the API rather than stopping at the constructor.
@@ -77,7 +78,7 @@ Stated so the rule is not applied where it does not belong:
 - **Genuinely runtime-chosen sets stay values.** Where a distinction is not
   known until the program runs — a currency parsed from input — it cannot live
   in a type, and enforcing it at run time is the highest rung available. See
-  [Amount](amount.md).
+  [Amount](../domain/amount.md).
 - **It costs ergonomics.** A fallible constructor obliges every caller to handle
   failure. The cost is worth paying at a chokepoint, where it is paid once, and
   not worth spreading across every call site.

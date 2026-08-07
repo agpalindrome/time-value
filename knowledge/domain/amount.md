@@ -2,13 +2,14 @@
 type: Quantity
 title: Amount
 description: A quantity of money located at a point in time.
-tags: [money, quantity]
+tags: [money, numerics]
 status: stable
 verified:
   - { by: human:ojhermann, at: 2026-08-07T02:37:35Z }
   - { by: human:ojhermann, at: 2026-08-07T15:13:35Z }
   - { by: human:ojhermann, at: 2026-08-07T15:40:47Z }
-generated: { by: claude/opus-5, at: 2026-08-07T15:50:27Z }
+  - { by: human:ojhermann, at: 2026-08-07T18:50:30Z }
+generated: { by: claude/opus-5, at: 2026-08-07T19:00:08Z }
 sources:
   - id: wikipedia-fv
     resource: https://en.wikipedia.org/wiki/Future_value
@@ -61,6 +62,32 @@ private magnitude is what allows a currency to be added later without altering a
 single existing signature. Exposing it directly would forfeit that, and with it
 the flexibility above. This is a constraint on the implementation, not a
 preference.
+
+**Decided — a read accessor exists, and is a deliberate hole.** The field stays
+private, so the invariant holds and cannot be circumvented. But a method handing
+the number out puts every operation listed below as _unimplemented_ — including
+the meaningless ones — within reach of a caller willing to do the arithmetic
+themselves.
+
+The accessor stays because a value type nobody can get a value out of does not
+get used, and the alternative of routing every caller through rendering and
+parsing is worse. What it costs is worth stating exactly: once an Amount records
+a currency, the accessor returns a value stripped of its unit while every
+existing call site goes on compiling, and adding two magnitudes drawn from
+different currencies is precisely the mistake this type exists to prevent. So
+"without altering a single existing signature" is true of the signatures and not
+of their meaning.
+
+**Decided — the accessor is renamed when a currency lands.** Once the number it
+returns is a partial view, its name is the only warning left, and it should read
+wrong at a call site doing arithmetic with it. That is the trigger; there is
+nothing to rename while the number is still the whole value.
+
+**Derived — reaching through the hatch is evidence an operation is missing, not
+that the hatch is acceptable.** This library's own test used it to divide two
+Amounts — an operation named in the table below as true and merely
+unimplemented. That was the argument for implementing it rather than for leaving
+the hatch to absorb the need. The same reading applies to the next one.
 
 **Derived — when a currency is named, it is a value the Amount carries, not a
 tag in its type.** A currency is chosen while the program runs: parsed from an
@@ -160,6 +187,14 @@ Because the domain is unbounded and any representation is not, each operation
 above that yields an Amount can leave the domain. Amount ÷ Amount is separately
 partial at a zero divisor.
 
+**Leaving it at the bottom counts as much as leaving it at the top.** Overflow
+is conspicuous — the result is an infinity, which the rules here already
+exclude. Underflow is not: a small enough amount scaled by a valid factor
+becomes zero, which is a perfectly ordinary Amount, so nothing announces that
+the value was lost. Worse, it is _signed_ zero, and a liability that underflows
+stops comparing as less than zero — so a guarantee about carrying the sign
+quietly stops holding. Both ends are failures and both are reported.
+
 This is a property of the domain meeting a representation, not of the
 mathematics. It is stated here so that whatever represents an Amount cannot
 quietly pretend the operations are total.
@@ -211,11 +246,18 @@ bits — `PV(1 + rt)` against `PV + PV·rt` is exactly such a pair — and this
 equality calls them different. Nothing weaker is available without giving up
 more than it buys.
 
-**Derived — barring non-values makes equality reflexive, and so total.** NaN is
-the only binary floating-point value unequal to itself. Having excluded it, an
-Amount carries full equality and a total order rather than the partial forms
-floating point normally forces, which is what makes sorting, deduplication and
-use as a key available at all.
+**Derived — barring non-values makes equality reflexive.** NaN is the only
+binary floating-point value unequal to itself, so excluding it gives an Amount
+full equality rather than the partial form floating point normally forces.
+
+This was first written as also yielding a _total order_, and as making "sorting,
+deduplication and use as a key available at all". Both were too strong.
+[Ordering holds within a unit and not across](#order-holds-within-a-unit-not-across-units),
+so a total order is a promise this bundle has already declined to make — and
+hash-keyed use needs a hash that agrees with equality, which means one that maps
+negative zero and zero together, since they are equal here. Ordered collections
+work; hashed ones need that hash written deliberately, and a derived one would
+be wrong.
 
 **Derived — the order must be the one that agrees with equality.** The obvious
 tool for totally ordering binary floats places negative zero below zero, while
@@ -231,6 +273,14 @@ structure that assumes one. It is a separate operation, asked for explicitly.
 
 This is what a test comparing a computed Amount against an expected one wants.
 Equality is the wrong instrument there, and reaching for it is the common error.
+
+**Measured 2026-08-07 — the toolchain enforces this independently.** Clippy's
+`float_cmp` fires on `assert_eq!` between two binary floats inside a `#[test]`,
+and under a denied `pedantic` group that is a hard error, not a warning. The
+`allow-*-in-tests` options in `clippy.toml` have no member covering it, so the
+usual test exemptions do not apply. A test suite for this library therefore
+cannot reach for equality even by accident — a lint arrived at the same
+conclusion as the reasoning above, from an entirely different direction.
 
 # Approximate comparison is two operations, not one
 
@@ -282,6 +332,23 @@ what error is acceptable, and this library cannot know whether a caller is
 reconciling a ledger or checking that a solve converged. The caller names it.
 That costs one argument and prevents a silently wrong answer, which is the trade
 made everywhere else here.
+
+**Decided — the two terms are carried by a type, built one named term at a
+time.** Passed as two adjacent numbers they can be transposed, and a transposed
+pair does not fail — it changes which comparisons pass. Near zero the absolute
+term decides and at scale the relative one does, so a swap is wrong in opposite
+directions depending on the magnitudes, and both directions occur in ordinary
+use. This is the same argument that gives a
+[rate](simple-interest-rate.md#it-is-a-fraction-and-the-formula-forces-that) two
+named constructors rather than one, applied to a hazard the first version of
+this Concept did not notice it had created.
+
+**Decided — a tolerance is validated like every other quantity here.** A NaN
+tolerance is silently discarded by the obvious implementation, because taking
+the maximum of two numbers returns the one that is not NaN — so the comparison
+answers confidently under a tolerance the caller never supplied. A negative
+tolerance costs the comparison its reflexivity. Both are refused at
+construction.
 
 # Rendering is two operations, and only one belongs here
 
@@ -384,9 +451,9 @@ nothing a named method does not.
 
 # How this Concept satisfies the standing rule
 
-[Illegal states are unrepresentable](illegal-states-unrepresentable.md) applies
-here, at rung 2 of its ladder: a representation's non-values exist and cannot be
-removed by any type discipline, so **an Amount holding one must not be
+[Illegal states are unrepresentable](../principles/illegal-states-unrepresentable.md)
+applies here, at rung 2 of its ladder: a representation's non-values exist and
+cannot be removed by any type discipline, so **an Amount holding one must not be
 constructible.** Construction validates and can fail, and no path skips it.
 
 This gives the private magnitude required in
@@ -421,5 +488,29 @@ Everything else once parked here has collapsed into that one question. A
 currency's minor unit is what supplies a settlement tolerance and a rounded
 rendering's place count alike, so both wait on the same answer and neither is
 needed before it.
+
+## What the currency work must revisit
+
+Recorded here rather than only where each was decided, because this section is
+where that work starts and a trigger nobody finds is not a trigger.
+
+- **The read accessor.** It returns the whole value today and a value stripped
+  of its unit the moment a currency exists, while every call site goes on
+  compiling. Rename it then, to something that reads wrong at a call site doing
+  arithmetic with it. See
+  [both readings](#both-readings-of-same-unit-stay-admissible).
+- **Ordering.** Already `PartialOrd` and deliberately not a total order, so
+  nothing needs withdrawing — but the day a currency lands is the day the
+  comparison must start returning "these do not compare" rather than an answer.
+  See [order holds within a unit](#order-holds-within-a-unit-not-across-units).
+- **What an absent currency means when it meets a named one.** Decided already —
+  it is not silently resolved — but the mechanism is not built, and it is the
+  first thing the representation has to express. See
+  [an absent currency](#an-absent-currency-means-unrecorded-never-unitless).
+- **Equality.** It survives unchanged and should be checked rather than assumed:
+  including the unit keeps it total, because "are these the same?" has an answer
+  across currencies where "which is larger?" does not.
+- **The settlement comparison and the rounded rendering**, both of which take a
+  currency's minor unit as their parameter and are deferred on exactly that.
 
 [^wikipedia-fv]: _Future value_, Wikipedia, revision last modified 2026-08-04.
