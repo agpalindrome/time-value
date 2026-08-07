@@ -10,7 +10,8 @@ verified:
   - { by: human:ojhermann, at: 2026-08-07T15:40:47Z }
   - { by: human:ojhermann, at: 2026-08-07T18:50:30Z }
   - { by: human:ojhermann, at: 2026-08-07T19:07:03Z }
-generated: { by: claude/opus-5, at: 2026-08-07T19:00:08Z }
+  - { by: human:ojhermann, at: 2026-08-07T22:22:09Z }
+generated: { by: claude/opus-5, at: 2026-08-07T22:06:40Z }
 sources:
   - id: wikipedia-fv
     resource: https://en.wikipedia.org/wiki/Future_value
@@ -275,13 +276,35 @@ structure that assumes one. It is a separate operation, asked for explicitly.
 This is what a test comparing a computed Amount against an expected one wants.
 Equality is the wrong instrument there, and reaching for it is the common error.
 
-**Measured 2026-08-07 — the toolchain enforces this independently.** Clippy's
-`float_cmp` fires on `assert_eq!` between two binary floats inside a `#[test]`,
-and under a denied `pedantic` group that is a hard error, not a warning. The
-`allow-*-in-tests` options in `clippy.toml` have no member covering it, so the
-usual test exemptions do not apply. A test suite for this library therefore
-cannot reach for equality even by accident — a lint arrived at the same
-conclusion as the reasoning above, from an entirely different direction.
+**Measured 2026-08-07 — the toolchain enforces this, but not everywhere.**
+Clippy's `float_cmp` fires on `assert_eq!` between two binary floats inside a
+`#[test]`, and under a denied `pedantic` group that is a hard error, not a
+warning. The `allow-*-in-tests` options in `clippy.toml` have no member covering
+it, so the usual test exemptions do not apply.
+
+**Corrected 2026-08-07 — the earlier claim that a test suite here "cannot reach
+for equality even by accident" was too strong**, and it failed in the way an
+unconditional claim about a tool usually does: the tool has a condition nobody
+looked for. `float_cmp` suppresses itself based on the **enclosing item's
+name**. Measured on clippy 0.1.97 under this repository's configuration, a
+`#[test] fn` named `eq`, `ne` or `is_nan`, or whose name starts `eq_` or ends
+`_eq`, compiles clean while comparing two computed `f64` — and the identical
+body in a function named anything else is a hard error. `float_cmp_const` does
+not close the gap: comparing a computed value against a literal inside an
+exempt-named function is silent too.
+
+Those five forms are the whole of the condition, not a sample of it: clippy's
+`float_cmp.rs` at the `rust-1.97.0` tag reads the parent item's name and returns
+early on exactly `eq`, `ne`, `is_nan`, a `eq_` prefix or a `_eq` suffix. Each
+was also run here — the list is read from the source and confirmed against the
+compiler, since either alone has been wrong before.
+
+So the lint agrees with the reasoning above, from an entirely different
+direction, **for as long as the test is not named after the thing it is
+testing** — which is exactly what a test of equality would be called. Nothing in
+`crates/` currently sits in the exempt shape, so this is latent rather than
+live; it is recorded because a guarantee believed to be unconditional is the
+kind that is never re-checked.
 
 # Approximate comparison is two operations, not one
 

@@ -2,6 +2,14 @@
 
 ## 2026-08-07
 
+- **Update**: Corrected [amount](domain/amount.md) and
+  [a claim earns a test](principles/a-claim-earns-a-test.md) — both stated that
+  clippy's `float_cmp` makes `assert_eq!` on two computed floats unreachable in
+  a test, and neither said that the lint exempts itself by the enclosing
+  function's name. Measured: a test named `eq`, `ne`, `is_nan`, or one starting
+  `eq_` or ending `_eq`, compiles clean. Latent, since nothing in `crates/` sits
+  in that shape, and an instance of the bundle's own rule that a check is
+  believed only in the shape it has been seen to fail in.
 - **Update**: Recorded in
   [a claim earns a test](principles/a-claim-earns-a-test.md) that a check is not
   believed until it has been seen to go red, and that a parser beats a pattern
