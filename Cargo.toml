@@ -1,69 +1,110 @@
 [workspace]
-resolver = "2"
-members = [
-    "crates/time_value",
-    "crates/time-value-daycount",
-    "crates/time-value-cli",
-    "crates/time-value-mcp",
-]
+# Required: a virtual workspace does not infer the resolver from its members and
+# silently defaults to 1.
+resolver = "3"
+members = ["crates/time_value"]
 
-# Shared metadata, dependency versions, and lints, inherited by member crates via
-# `field.workspace = true` (see docs/adr/0002-workspace-layout.md).
 [workspace.package]
-# No shared `version`: each crate carries its own (independent semver, driven by
-# release-plz from Conventional Commits — docs/adr/0012-ci-and-release-automation.md).
-edition = "2021"
-rust-version = "1.88"
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/ojhermann-org/time-value"
+edition      = "2024"
+rust-version = "1.97"
+license      = "MIT OR Apache-2.0"
+repository   = "https://github.com/ojhermann-org/time-value"
 
+# Dependencies arrive when something needs them, never in advance.
 [workspace.dependencies]
-# Internal crates are depended on by workspace path so a breaking change cannot
-# compile-pass its consumers without updating them (ADR-0002).
-time_value = { path = "crates/time_value" }
-# Internal, unpublished (ADR-0030): ACT/365 day-count shared by both binaries.
-time-value-daycount = { path = "crates/time-value-daycount" }
 
-# Binary-only: CLI arg parsing and ergonomic error context. The core library
-# owns its own typed errors (ADR-0004); `anyhow` is for the binaries' `main`.
-anyhow = "1"
-clap = { version = "4", features = ["derive"] }
-
-# Serialisation for the JSON / MCP surfaces. The core library gates its own
-# `serde` derives behind a feature (ADR-0005); the binaries enable it.
-# `default-features = false` keeps the inherited dep `no_std`-compatible for the
-# core; the binaries add `std` (serde_json pulls it in transitively anyway).
-serde = { version = "1", default-features = false, features = ["derive"] }
-serde_json = "1"
-
-# MCP-binary-only (ADR-0011): the MCP SDK over stdio, its async runtime, and
-# JSON-Schema derivation for tool inputs. Async is contained to `-mcp`
-# (ADR-0003); the core library stays synchronous and `no_std`.
-rmcp = { version = "2.1", features = ["server", "macros", "transport-io", "schemars"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std", "sync"] }
-# `default-features = false` (drops schemars' own `std`) keeps the inherited dep
-# `no_std`+`alloc`-compatible for the core's optional `schemars` feature (ADR-0044);
-# the MCP binary re-adds `std` on its own inheriting line.
-schemars = { version = "1", default-features = false, features = ["derive"] }
-
-# Core optional (ADR-0009): transcendental functions (`powf`/`ln`/`exp`) for
-# `no_std` builds, feature-gated so the default core stays dependency-free.
-libm = "0.2"
-
-# Dev-only: run the compiled CLI/MCP binary and assert on stdout/stderr/exit.
-assert_cmd = "2"
-predicates = "3"
-
-# Dev-only: property-based tests for the core's numeric laws. A test framework,
-# never part of the published dependency tree (ADR-0009 constrains distribution,
-# not test tooling); the core-MSRV CI step builds rather than tests so its MSRV
-# does not gate the core's 1.85 (ADR-0017).
-proptest = "1"
-
+# Levels are authoritative here; CI adds no `-D warnings`. Every member needs
+# `[lints] workspace = true` or it silently gets none of this.
 [workspace.lints.rust]
-unsafe_code = "forbid"
-missing_docs = "deny"
+future_incompatible = { level = "deny", priority = -1 }
+nonstandard_style   = { level = "deny", priority = -1 }
+unused              = { level = "deny", priority = -1 }
+let_underscore      = { level = "deny", priority = -1 }
+keyword_idents      = { level = "deny", priority = -1 }
+refining_impl_trait = { level = "deny", priority = -1 }
+rust_2018_idioms    = { level = "deny", priority = -1 }
+
+unsafe_code                   = "forbid"
+missing_docs                  = "deny"
+missing_debug_implementations = "deny"
+unreachable_pub               = "deny"
+unsafe_op_in_unsafe_fn        = "deny"
+unfulfilled_lint_expectations = "deny"
+trivial_casts                 = "deny"
+trivial_numeric_casts         = "deny"
+unused_qualifications         = "deny"
+unused_lifetimes              = "deny"
+unused_import_braces          = "deny"
+macro_use_extern_crate        = "deny"
 
 [workspace.lints.clippy]
-all = { level = "warn", priority = -1 }
-pedantic = { level = "warn", priority = -1 }
+correctness = { level = "deny", priority = -1 }
+suspicious  = { level = "deny", priority = -1 }
+complexity  = { level = "deny", priority = -1 }
+perf        = { level = "deny", priority = -1 }
+style       = { level = "deny", priority = -1 }
+pedantic    = { level = "deny", priority = -1 }
+cargo       = { level = "deny", priority = -1 }
+# `restriction` and `nursery` are never enabled as groups — cherry-picks only.
+
+multiple_crate_versions = "allow"
+
+# restriction — panic-freedom
+unwrap_used        = "deny"
+panic              = "deny"
+panic_in_result_fn = "deny"
+unwrap_in_result   = "deny"
+todo               = "deny"
+unimplemented      = "deny"
+unreachable        = "deny"
+indexing_slicing   = "deny"
+get_unwrap         = "deny"
+string_slice       = "deny"
+exit               = "deny"
+
+# restriction — suppression discipline
+allow_attributes                = "deny"
+allow_attributes_without_reason = "deny"
+
+# restriction — unsafe
+undocumented_unsafe_blocks    = "deny"
+multiple_unsafe_ops_per_block = "deny"
+unnecessary_safety_comment    = "deny"
+unnecessary_safety_doc        = "deny"
+
+# restriction — debug / IO
+dbg_macro        = "deny"
+print_stdout     = "deny"
+print_stderr     = "deny"
+filetype_is_file = "deny"
+
+# restriction — silent failure
+let_underscore_must_use     = "deny"
+unused_result_ok            = "deny"
+map_err_ignore              = "deny"
+assertions_on_result_states = "deny"
+
+# restriction — footguns, numeric, tests
+rc_mutex               = "deny"
+mem_forget             = "deny"
+iter_over_hash_type    = "deny"
+float_cmp_const        = "deny"
+lossy_float_literal    = "deny"
+missing_assert_message = "deny"
+redundant_test_prefix  = "deny"
+
+# nursery cherry-picks
+path_buf_push_overwrite    = "deny"
+read_zero_byte_vec         = "deny"
+fallible_impl_from         = "deny"
+debug_assert_with_mut_call = "deny"
+collection_is_never_read   = "deny"
+needless_collect           = "deny"
+or_fun_call                = "deny"
+use_self                   = "deny"
+equatable_if_let           = "deny"
+trivial_regex              = "deny"
+
+# Inert unless CI runs `cargo doc`.
+[workspace.lints.rustdoc]
+all = { level = "deny", priority = -1 }

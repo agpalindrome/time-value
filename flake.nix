@@ -15,7 +15,6 @@
 
   outputs =
     {
-      self,
       nixpkgs,
       rust-overlay,
       git-hooks,
@@ -28,87 +27,89 @@
         "aarch64-linux"
       ];
 
-      forAllSystems =
-        f:
-        nixpkgs.lib.genAttrs systems (
-          system:
-          f (
-            import nixpkgs {
-              inherit system;
-              overlays = [ (import rust-overlay) ];
-            }
-          )
-        );
-
-      # git-hooks.nix: fast pre-commit hooks, kept as a local convenience. The
-      # heavy checks (clippy/test/deny) run through the same flake in CI as
-      # `nix develop -c cargo …` — see docs/adr/0012-ci-and-release-automation.md.
-      mkPreCommit =
-        pkgs:
-        git-hooks.lib.${pkgs.stdenv.hostPlatform.system}.run {
-          src = ./.;
-          hooks = {
-            rustfmt.enable = true;
-            nixfmt.enable = true;
-            typos = {
-              enable = true;
-              # `currency.rs` is a generated ISO 4217 data table — 177 currency
-              # codes and their (often non-English) names — which a spell-checker
-              # will always fight, so exclude it from typos.
-              excludes = [ "crates/time_value/src/currency\\.rs" ];
-            };
-            trim-trailing-whitespace.enable = true;
-            end-of-file-fixer.enable = true;
-            check-toml.enable = true;
-            check-merge-conflicts.enable = true;
-            detect-private-keys.enable = true;
+      mkEnv =
+        system:
+        let
+          pkgs = import nixpkgs {
+            inherit system;
+            overlays = [ (import rust-overlay) ];
           };
+
+          rustToolchain = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
+
+          # A second component, not a second pin: most of rustfmt.toml is
+          # nightly-only and stable ignores it silently.
+          nightlyRustfmt = pkgs.rust-bin.nightly."2026-08-01".rustfmt;
+
+          fmtCheck = pkgs.writeShellScriptBin "tv-fmt-check" ''
+            export RUSTFMT="${nightlyRustfmt}/bin/rustfmt"
+            exec ${rustToolchain}/bin/cargo fmt --all -- --check
+          '';
+
+          preCommit = git-hooks.lib.${system}.run {
+            src = ./.;
+            hooks = {
+              # Not git-hooks' own `rustfmt` hook: it runs the stable binary.
+              cargo-fmt = {
+                enable = true;
+                name = "cargo fmt (pinned nightly)";
+                entry = "${fmtCheck}/bin/tv-fmt-check";
+                language = "system";
+                files = "\\.rs$";
+                pass_filenames = false;
+              };
+              nixfmt.enable = true;
+              typos.enable = true;
+              trim-trailing-whitespace.enable = true;
+              end-of-file-fixer.enable = true;
+              check-toml.enable = true;
+              check-merge-conflicts.enable = true;
+              detect-private-keys.enable = true;
+            };
+          };
+        in
+        {
+          inherit
+            pkgs
+            rustToolchain
+            nightlyRustfmt
+            fmtCheck
+            preCommit
+            ;
         };
+
+      forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f (mkEnv system));
     in
     {
-      # `nix flake check` validates the pre-commit hook set. The workspace's own
-      # verification (fmt/clippy/test/deny) is run via `nix develop -c cargo …`
-      # (locally, and in CI) so there is one definition of each tool.
-      checks = forAllSystems (pkgs: {
-        pre-commit = mkPreCommit pkgs;
+      checks = forAllSystems (env: {
+        pre-commit = env.preCommit;
       });
 
       devShells = forAllSystems (
-        pkgs:
+        env:
         let
-          # The toolchain (with clippy/rustfmt/rust-src) is pinned by
-          # rust-toolchain.toml; oxalica/rust-overlay reads it.
-          rustToolchain = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
-          pre-commit = mkPreCommit pkgs;
+          inherit (env) pkgs;
         in
         {
           default = pkgs.mkShell {
             packages = [
-              rustToolchain
+              env.rustToolchain
+              env.fmtCheck
               pkgs.bacon
               pkgs.cargo-nextest
               pkgs.cargo-deny
               pkgs.nixfmt
             ];
             buildInputs =
-              pre-commit.enabledPackages ++ nixpkgs.lib.optionals pkgs.stdenv.isDarwin [ pkgs.libiconv ];
-            # Installs the git-hooks managed pre-commit hook on shell entry.
-            inherit (pre-commit) shellHook;
-          };
+              env.preCommit.enabledPackages ++ nixpkgs.lib.optionals pkgs.stdenv.isDarwin [ pkgs.libiconv ];
 
-          # A minimal 1.85 toolchain to verify the core library's MSRV
-          # (docs/adr/0017-per-crate-msrv-core-1.85.md). The workspace builds on
-          # 1.88 (rust-toolchain.toml); only `cargo build -p time_value` runs here
-          # (a build, not a test, so dev-deps like proptest don't gate the MSRV).
-          msrv = pkgs.mkShell {
-            packages = [
-              pkgs.rust-bin.stable."1.85.0".minimal
-            ]
-            ++ nixpkgs.lib.optionals pkgs.stdenv.isDarwin [ pkgs.libiconv ];
+            RUSTFMT = "${env.nightlyRustfmt}/bin/rustfmt";
+
+            inherit (env.preCommit) shellHook;
           };
         }
       );
 
-      formatter = forAllSystems (pkgs: pkgs.nixfmt);
+      formatter = forAllSystems (env: env.pkgs.nixfmt);
     };
 }

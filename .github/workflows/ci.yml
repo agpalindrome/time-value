@@ -1,19 +1,10 @@
 name: CI
 
-# Every check runs through the Nix flake (`nix develop -c cargo …`) so CI uses
-# the exact toolchain, cargo-nextest, and cargo-deny the flake pins — one source
-# of truth with local dev (docs/adr/0012-ci-and-release-automation.md).
-
 on:
   push:
     branches: [main]
   pull_request:
-  # Run in the merge queue too: the `ci` check must be produced against the
-  # `merge_group` ref, or a required-check merge queue would deadlock (see
-  # docs/adr/0012-ci-and-release-automation.md).
-  merge_group:
 
-# A newer push to the same ref supersedes an in-flight run.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -22,9 +13,6 @@ permissions:
   contents: read
 
 jobs:
-  # NOTE: the job id `ci` is the required status check enforced by the org
-  # ruleset — do not rename it or set a custom `name:` (which would change the
-  # surfaced check name) and do not remove it (see CLAUDE.md).
   ci:
     runs-on: ubuntu-latest
     steps:
@@ -34,12 +22,6 @@ jobs:
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@v21
 
-      # No Nix store cache: it was measured a net loss (ADR-0066). Saving it cost a
-      # mean 88.6s per run against a 26s benefit, and half the 10 GB budget sat in
-      # PR/merge-queue ref scopes that no later run can read, evicting the `main`
-      # scope that they *can* — so the cache kept causing its own misses. Every path
-      # CI needs is substituted from cache.nixos.org or static.rust-lang.org; nothing
-      # is built here, so removing it cannot turn a download into a compile.
       - name: Cargo registry & build cache
         uses: actions/cache@v4
         with:
@@ -51,97 +33,28 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
+      # The devshell exports RUSTFMT, so this resolves the pinned nightly. On
+      # stable the nightly-only options would be ignored and this would pass.
       - name: Format
         run: nix develop -c cargo fmt --all -- --check
 
-      # Default features build the `no_std`, zero-dependency core — this is the
-      # step that catches an accidental `std` dependency in the core.
-      - name: Clippy (default features)
-        run: nix develop -c cargo clippy --workspace --all-targets -- -D warnings
+      # No `-D warnings`: levels are set in Cargo.toml, so the CI verdict and the
+      # local verdict are the same.
+      - name: Clippy
+        run: nix develop -c cargo clippy --workspace --all-targets --locked
 
-      - name: Clippy (all features)
-        run: nix develop -c cargo clippy --workspace --all-targets --all-features -- -D warnings
-
-      # The no_std + libm path (transcendental math via libm::pow) is not built
-      # by --all-features, which prefers std; check it explicitly so it can't rot.
-      - name: Clippy (no_std + libm)
-        run: nix develop -c cargo clippy -p time_value --no-default-features --features libm --all-targets -- -D warnings
-
-      # The serde derives must stay no_std-clean: --all-features pulls in std, so
-      # check the pure no_std + serde build explicitly (ADR-0042).
-      - name: Clippy (no_std + serde)
-        run: nix develop -c cargo clippy -p time_value --no-default-features --features serde --all-targets -- -D warnings
-
-      # The owned `OwnedCashflows` (alloc) must compile no_std too — with libm so
-      # its transcendental `mirr` forward is built without std (ADR-0043).
-      - name: Clippy (no_std + alloc + libm)
-        run: nix develop -c cargo clippy -p time_value --no-default-features --features alloc,libm --all-targets -- -D warnings
-
-      # The owned series' sequence wire form needs serde's own `alloc` feature,
-      # which the `alloc = ["serde?/alloc"]` weak dependency feature supplies
-      # (ADR-0060). No other configuration proves it, and this one only does so
-      # **without `--all-targets`**: any build that includes the test targets pulls
-      # the `serde_json` dev-dependency, which enables `serde/std` and hides a
-      # missing `serde/alloc` — as `--all-features` does too. Lib-only is exactly
-      # the dependency graph a downstream `features = ["alloc", "serde"]` user gets.
-      - name: Clippy (no_std + alloc + serde, lib only)
-        run: nix develop -c cargo clippy -p time_value --no-default-features --features alloc,serde -- -D warnings
-
-      # The schemars (JsonSchema) impls must stay no_std-clean: --all-features pulls
-      # in std, so check the pure no_std + schemars build explicitly (ADR-0044).
-      - name: Clippy (no_std + schemars)
-        run: nix develop -c cargo clippy -p time_value --no-default-features --features schemars --all-targets -- -D warnings
-
-      # The *dated* owned series' wire impls need `alloc` **and** a transcendental-math
-      # feature (the dated types are behind std/libm), so no configuration above builds
-      # them without `std`: the two lines just above stop short of libm, and
-      # --all-features brings std in. This is the graph a downstream no_std consumer of
-      # the dated wire format gets (ADR-0065). Lib-only for ADR-0060's reason — the
-      # test targets' `serde_json` would enable `serde/std` and mask a std-only path.
-      - name: Clippy (no_std + alloc + libm + serde + schemars, lib only)
-        run: nix develop -c cargo clippy -p time_value --no-default-features --features alloc,libm,serde,schemars -- -D warnings
-
-      # `--all-features` so feature-gated operations (and their tests) are
-      # exercised, not just compiled.
+      # `--no-tests=pass` only while the crate is empty. Remove it with the first
+      # real test: nextest failing on zero tests is the check working.
       - name: Test
-        run: nix develop -c cargo nextest run --workspace --all-features
+        run: nix develop -c cargo nextest run --workspace --locked --no-tests=pass
 
-      # `--all-features` above enables `std`, so its `powf` runs — but the
-      # `no_std` + `libm` path (`libm::pow`) then never executes, only compiles.
-      # Run the core's tests under it too, so a std/libm numeric divergence can't
-      # slip through (ADR-0021).
-      - name: Test (no_std + libm)
-        run: nix develop -c cargo nextest run -p time_value --no-default-features --features libm
-
-      # nextest does not run doctests; run them explicitly (they include the
-      # `compile_fail` doctests that prove the periodicity mismatch is rejected,
-      # and the core crate's README, which is compiled as a doctest so the
-      # crates.io front page cannot drift from the API — ADR-0055).
+      # nextest does not run doc tests.
       - name: Doctests
-        run: nix develop -c cargo test --doc --workspace --all-features
+        run: nix develop -c cargo test --doc --workspace --locked
 
-      # Rustdoc warnings are part of the published artefact: a broken intra-doc
-      # link in this crate is emitted into every downstream `cargo doc` run.
-      # Check both the advertised default (`no_std`, where most of the API is
-      # gated away) and the all-features surface docs.rs builds (ADR-0055).
-      - name: Docs (default features)
-        run: nix develop -c cargo doc -p time_value --no-deps
-        env:
-          RUSTDOCFLAGS: -D warnings
+      # Without this every `[lints.rustdoc]` entry is inert.
+      - name: Docs
+        run: nix develop -c cargo doc -p time_value --no-deps --locked
 
-      - name: Docs (all features)
-        run: nix develop -c cargo doc -p time_value --no-deps --all-features
-        env:
-          RUSTDOCFLAGS: -D warnings
-
-      # The core library keeps a conservative MSRV (1.85) below the workspace
-      # toolchain (1.88, forced by the MCP crate's deps). Verify it on a real 1.85
-      # toolchain so the promise can't silently regress (ADR-0017). This is a
-      # `build`, not a `test`: dev-dependencies (proptest) and `#[cfg(test)]` code
-      # are not part of the published crate, and building skips them, so a test
-      # framework with a newer MSRV cannot force the core's MSRV up.
-      - name: Core MSRV (1.85)
-        run: nix develop .#msrv -c cargo build -p time_value --all-features
-
-      - name: Licences & advisories
-        run: nix develop -c cargo deny check
+      - name: Deny
+        run: nix develop -c cargo deny check all

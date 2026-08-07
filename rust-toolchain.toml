@@ -1,4 +1,13 @@
+# The single toolchain pin. `flake.nix` reads this file via
+# `rust-bin.fromRustupToolchainFile`, so nix and rustup resolve the same
+# toolchain and there is nothing to reconcile.
+#
+# The pinned nightly `rustfmt` is a second *component*, not a second pin, and
+# lives in `flake.nix` because it comes from a different channel.
 [toolchain]
-channel = "1.88.0"
-components = ["rustfmt", "clippy", "rust-src"]
-profile = "minimal"
+channel = "1.97.1"
+components = [
+  "clippy",
+  "rustfmt",
+  "rust-src",
+]

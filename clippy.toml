@@ -1,0 +1,22 @@
+too-many-arguments-threshold = 7
+type-complexity-threshold    = 250
+excessive-nesting-threshold  = 5
+too-many-lines-threshold     = 100
+enum-variant-size-threshold  = 200
+large-error-threshold        = 128
+too-large-for-stack          = 200
+array-size-threshold         = 16384
+
+upper-case-acronyms-aggressive = false
+
+# Key on the `#[test]` attribute, so they do not cover helper fns in `tests/`.
+allow-unwrap-in-tests           = true
+allow-panic-in-tests            = true
+allow-indexing-slicing-in-tests = true
+allow-dbg-in-tests              = true
+allow-print-in-tests            = true
+allow-useless-vec-in-tests      = true
+
+# Grows from decisions; every entry must be verified to fire, since a bad path
+# only warns and bans nothing.
+disallowed-methods = []
