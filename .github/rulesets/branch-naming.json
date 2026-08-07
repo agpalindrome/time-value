@@ -1,0 +1,27 @@
+{
+  "bypass_actors": [],
+  "conditions": {
+    "ref_name": {
+      "exclude": [
+        "~DEFAULT_BRANCH"
+      ],
+      "include": [
+        "~ALL"
+      ]
+    }
+  },
+  "enforcement": "active",
+  "name": "branch-naming",
+  "rules": [
+    {
+      "parameters": {
+        "name": "",
+        "negate": false,
+        "operator": "regex",
+        "pattern": "^(feat|fix|chore|docs|refactor)/.*"
+      },
+      "type": "branch_name_pattern"
+    }
+  ],
+  "target": "branch"
+}
