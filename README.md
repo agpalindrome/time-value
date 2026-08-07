@@ -3,6 +3,8 @@
 Type-safe time-value-of-money calculations in Rust.
 
 A Cargo workspace whose published crate is [`time_value`](crates/time_value).
+`crates/bundle-check` sits beside it, unpublished, and exists so the knowledge
+bundle's invariants are asserted rather than eyeballed.
 
 Nothing here is published. The `0.1.0`–`0.8.0` series on crates.io is a
 separate, immutable history that this line does not continue.
@@ -43,7 +45,8 @@ It reports every check rather than stopping at the first failure, and refuses to
 run against a stable `rustfmt`, which would silently ignore most of
 `rustfmt.toml` and pass anyway.
 
-Changes to `knowledge/` are validated separately, from `okf-tools`' own flake:
+The bundle's frontmatter invariants are part of the tests above. Its structure
+and links are checked separately, from `okf-tools`' own flake:
 
 ```sh
 nix run github:ojhermann-org/okf-tools#okf-graph -- knowledge

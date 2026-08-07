@@ -27,7 +27,10 @@ CHECKS=(
   "clippy|cargo clippy --workspace --all-targets --locked"
   "test|cargo nextest run --workspace --locked"
   "doctest|cargo test --doc --workspace --locked"
-  "doc|cargo doc -p time_value --no-deps --locked"
+  # --workspace, not -p time_value: a crate the doc step skips has its
+  # [lints.rustdoc] silently inert, which is the failure this step exists to
+  # catch.
+  "doc|cargo doc --workspace --no-deps --locked"
   "deny|cargo deny check all"
 )
 

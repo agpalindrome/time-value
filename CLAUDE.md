@@ -110,10 +110,9 @@ It also refuses to run against a stable `rustfmt`: most of `rustfmt.toml` is
 nightly-only and stable ignores it silently, so that would be a pass which
 verified almost nothing.
 
-The bundle's _invariants_ — type present, status valid, actors well-formed, and
-no `stable` concept changed since it was verified — run as tests in
-`crates/bundle-check`, so `check.sh` covers them. Its _structure and links_ do
-not:
+The bundle's **invariants** — what its frontmatter must say — are tests in
+`crates/bundle-check`, so `check.sh` covers them. They are not listed here; the
+tests are their definition. Its **structure and links** are not covered:
 
 **Validate those separately after touching `knowledge/`:**
 
