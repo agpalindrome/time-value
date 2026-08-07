@@ -24,6 +24,12 @@ claim came from. It grows one concept at a time.
 - [Illegal states are unrepresentable](concepts/illegal-states-unrepresentable.md) -
   A value that would be invalid should be impossible to construct, not merely
   detectable afterwards.
+- [Failures are classified by remedy](concepts/failures-are-classified-by-remedy.md) -
+  A failure is named for what would fix it, and where two rules could both apply
+  the unfixable one wins.
+- [A claim earns a test](concepts/a-claim-earns-a-test.md) - Anything this
+  bundle asserts about implemented behaviour has a test that fails when the code
+  stops honouring it.
 - [The bundle is revisable](concepts/the-bundle-is-revisable.md) - Content,
   structure and decomposition all change as understanding improves; none of it
   is settled by having been written.

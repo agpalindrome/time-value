@@ -54,7 +54,8 @@ one way.**
 
 Written as a single expression, one operation carries unrelated failures and a
 caller has to disentangle which occurred. Split, each step carries a set with a
-common remedy.
+common remedy — see
+[failures are classified by remedy](failures-are-classified-by-remedy.md).
 
 **This table is a correction.** It first read that each step fails _exactly one
 way_ — build on domain grounds, apply on representation grounds — and called

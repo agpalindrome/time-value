@@ -8,7 +8,7 @@ verified:
   - { by: human:ojhermann, at: 2026-08-07T02:37:35Z }
   - { by: human:ojhermann, at: 2026-08-07T15:13:35Z }
   - { by: human:ojhermann, at: 2026-08-07T15:40:47Z }
-generated: { by: claude/opus-5, at: 2026-08-07T17:36:18Z }
+generated: { by: claude/opus-5, at: 2026-08-07T17:53:00Z }
 sources:
   - id: wikipedia-fv
     resource: https://en.wikipedia.org/wiki/Future_value
@@ -61,6 +61,20 @@ private magnitude is what allows a currency to be added later without altering a
 single existing signature. Exposing it directly would forfeit that, and with it
 the flexibility above. This is a constraint on the implementation, not a
 preference.
+
+**A read accessor is not the same thing, and its cost is real.** The field stays
+private, so the invariant holds and cannot be circumvented — but a method
+handing the number out means every operation listed below as _unimplemented_,
+including the meaningless ones, is reachable by a caller willing to do the
+arithmetic themselves. More importantly for the deferral above: once an Amount
+records a currency, such an accessor returns a partial view of the value while
+every existing call site goes on compiling. Nothing warns.
+
+This is recorded rather than resolved. The accessor exists because a value type
+with no way out is not usable, and the alternative — routing every caller
+through rendering and parsing — is worse. What it costs is that "without
+altering a single existing signature" is true of the signatures and not of their
+meaning.
 
 **Derived — when a currency is named, it is a value the Amount carries, not a
 tag in its type.** A currency is chosen while the program runs: parsed from an
@@ -159,6 +173,14 @@ magnitude; the _rate_ is the quantity, and it is what does the converting.
 Because the domain is unbounded and any representation is not, each operation
 above that yields an Amount can leave the domain. Amount ÷ Amount is separately
 partial at a zero divisor.
+
+**Leaving it at the bottom counts as much as leaving it at the top.** Overflow
+is conspicuous — the result is an infinity, which the rules here already
+exclude. Underflow is not: a small enough amount scaled by a valid factor
+becomes zero, which is a perfectly ordinary Amount, so nothing announces that
+the value was lost. Worse, it is _signed_ zero, and a liability that underflows
+stops comparing as less than zero — so a guarantee about carrying the sign
+quietly stops holding. Both ends are failures and both are reported.
 
 This is a property of the domain meeting a representation, not of the
 mathematics. It is stated here so that whatever represents an Amount cannot
@@ -297,6 +319,23 @@ what error is acceptable, and this library cannot know whether a caller is
 reconciling a ledger or checking that a solve converged. The caller names it.
 That costs one argument and prevents a silently wrong answer, which is the trade
 made everywhere else here.
+
+**Decided — the two terms are carried by a type, built one named term at a
+time.** Passed as two adjacent numbers they can be transposed, and a transposed
+pair does not fail — it changes which comparisons pass. Near zero the absolute
+term decides and at scale the relative one does, so a swap is wrong in opposite
+directions depending on the magnitudes, and both directions occur in ordinary
+use. This is the same argument that gives a
+[rate](simple-interest-rate.md#it-is-a-fraction-and-the-formula-forces-that) two
+named constructors rather than one, applied to a hazard the first version of
+this Concept did not notice it had created.
+
+**Decided — a tolerance is validated like every other quantity here.** A NaN
+tolerance is silently discarded by the obvious implementation, because taking
+the maximum of two numbers returns the one that is not NaN — so the comparison
+answers confidently under a tolerance the caller never supplied. A negative
+tolerance costs the comparison its reflexivity. Both are refused at
+construction.
 
 # Rendering is two operations, and only one belongs here
 
