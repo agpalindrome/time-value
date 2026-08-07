@@ -7,7 +7,7 @@ crates.io as `time_value` (the GitHub repo is `time-value`, kebab-cased per the
 org ruleset).
 
 The repo was restarted from nothing. It currently holds **foundations only** —
-one empty crate, `crates/time_value`, the `no_std` core.
+one empty crate, `crates/time_value`.
 
 ## Design principles
 
@@ -18,8 +18,6 @@ one empty crate, `crates/time_value`, the `no_std` core.
   behaviour; types follow. A type that catches no real failure mode does not
   belong — the pressure comes from the problem, never from a design decided in
   advance.
-- **`no_std`, zero dependencies by default.** Transcendental functions are
-  `std`-only; prefer an optional `libm` feature over an unconditional dependency.
 
 ## Rust and Nix conventions
 

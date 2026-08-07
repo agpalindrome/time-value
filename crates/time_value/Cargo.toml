@@ -7,7 +7,7 @@ description = "Type-safe time-value-of-money calculations"
 version    = "0.0.0"
 readme     = "README.md"
 keywords   = ["finance", "tvm", "interest", "present-value"]
-categories = ["finance", "mathematics", "no-std"]
+categories = ["finance", "mathematics"]
 
 edition.workspace      = true
 rust-version.workspace = true

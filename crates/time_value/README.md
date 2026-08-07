@@ -1,6 +1,6 @@
 # `time_value`
 
-Type-safe time-value-of-money calculations — a `no_std`, zero-dependency core.
+Type-safe time-value-of-money calculations.
 
 Nothing is implemented yet. This file is the crate's documentation, so every
 code block in it is compiled and run as a doc test; it grows one operation at a
