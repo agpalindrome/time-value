@@ -2,7 +2,7 @@
 # Required: a virtual workspace does not infer the resolver from its members and
 # silently defaults to 1.
 resolver = "3"
-members = ["crates/time_value"]
+members = ["crates/bundle-check", "crates/time_value"]
 
 [workspace.package]
 edition      = "2024"
@@ -12,6 +12,9 @@ repository   = "https://github.com/ojhermann-org/time-value"
 
 # Dependencies arrive when something needs them, never in advance.
 [workspace.dependencies]
+# Reads the bundle's YAML frontmatter. Hand-parsing it would repeat the class of
+# bug this test exists to catch.
+saphyr = "0.0.6"
 
 # Levels are authoritative here; CI adds no `-D warnings`. Every member needs
 # `[lints] workspace = true` or it silently gets none of this.
