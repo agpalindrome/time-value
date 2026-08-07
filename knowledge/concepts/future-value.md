@@ -4,7 +4,8 @@ title: Future value
 description:
   The value at a future date of a single present amount earning simple interest.
 tags: [simple-interest]
-status: draft
+status: stable
+verified: { by: human:ojhermann, at: 2026-08-07T02:37:35Z }
 generated: { by: claude/opus-5, at: 2026-08-07T01:24:01Z }
 sources:
   - id: wikipedia-fv

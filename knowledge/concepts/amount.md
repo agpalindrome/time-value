@@ -3,7 +3,8 @@ type: Quantity
 title: Amount
 description: A quantity of money located at a point in time.
 tags: [money, quantity]
-status: draft
+status: stable
+verified: { by: human:ojhermann, at: 2026-08-07T02:37:35Z }
 generated: { by: claude/opus-5, at: 2026-08-07T02:34:52Z }
 sources:
   - id: wikipedia-fv

@@ -5,7 +5,8 @@ description:
   A value that would be invalid should be impossible to construct, not merely
   detectable afterwards.
 tags: [design, standing-rule]
-status: draft
+status: stable
+verified: { by: human:ojhermann, at: 2026-08-07T02:37:35Z }
 generated: { by: claude/opus-5, at: 2026-08-07T02:21:28Z }
 ---
 
