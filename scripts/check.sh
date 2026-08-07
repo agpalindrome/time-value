@@ -9,10 +9,18 @@
 # failure — fixing one thing only to discover the next on the following push is
 # the slower loop.
 #
-# The list below is the only definition of what must pass. Documentation points
-# here rather than repeating it: a list in two places is a list that goes stale
-# in one of them, which is how the markdown check once ran in CI while the docs
-# described six checks and not seven.
+# The list below is the only definition of what CI enforces. Documentation
+# points here rather than repeating it: a list in two places is a list that goes
+# stale in one of them, which is how the markdown check once ran in CI while the
+# docs described six checks and not seven.
+#
+# It is not quite everything that guards this repo. `flake.nix` also wires
+# pre-commit hooks, and four of them — prettier, nixfmt, end-of-file-fixer,
+# trim-trailing-whitespace — *fix* files rather than report on them. Running a
+# fixer from here would make a script that verifies into one that edits your
+# tree, so those stay hooks. The two hooks that only report content problems,
+# `typos` and nix formatting, run below in their non-mutating form, because a
+# clone without hooks installed otherwise pushes straight past them.
 set -uo pipefail
 
 cd "$(git rev-parse --show-toplevel)" || exit 99
@@ -24,6 +32,13 @@ CHECKS=(
   # and bash without globstar reads `**` as `*`, so it matches one directory
   # deep and silently skips every file at the root.
   "markdown|prettier --check '**/*.md'"
+  # The hook runs `nixfmt`, which rewrites; `--check` only reports. The file
+  # list comes from git rather than a literal `flake.nix` so a second .nix file
+  # is covered the day it lands — naming it here would be the same list-in-two-
+  # places trap. `-z`/`-0` because a path may contain a space.
+  "nixfmt|git ls-files -z '*.nix' | xargs -0 nixfmt --check"
+  # Reports by default; only `--write-changes` edits.
+  "typos|typos"
   "clippy|cargo clippy --workspace --all-targets --locked"
   "test|cargo nextest run --workspace --locked"
   "doctest|cargo test --doc --workspace --locked"

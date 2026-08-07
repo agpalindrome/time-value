@@ -100,7 +100,7 @@ nix develop -c ./scripts/check.sh            # everything CI runs
 nix develop -c ./scripts/check.sh clippy     # one check, by name
 ```
 
-`scripts/check.sh` is the **only** definition of what must pass; CI runs the
+`scripts/check.sh` is the **only** definition of what CI enforces; CI runs the
 same script. Do not restate the list here or in the README — a list in two
 places is a list that goes stale in one of them, which is how the markdown check
 once ran in CI while the docs described six checks and not seven.
@@ -109,6 +109,21 @@ It runs every check and reports each, rather than stopping at the first failure.
 It also refuses to run against a stable `rustfmt`: most of `rustfmt.toml` is
 nightly-only and stable ignores it silently, so that would be a pass which
 verified almost nothing.
+
+**Pre-commit hooks in `flake.nix` are a second gate, and five of them run
+nowhere else:** `end-of-file-fixer`, `trim-trailing-whitespace`, `check-toml`,
+`check-merge-conflicts`, `detect-private-keys`. A clone without hooks armed
+pushes past all five and CI does not notice. They stay hooks because the first
+two rewrite files, and a script whose job is to verify must not edit your tree.
+
+The hooks that check **content** are in the script instead, in their
+non-mutating form — `typos`, and `nixfmt --check` rather than the rewriting
+`nixfmt` — since `typos` and nix formatting running only on a developer's
+machine is a real gap, where a missing trailing newline is not.
+
+The sentence above said "the only definition of what must **pass**" until
+2026-08-07, which was false in exactly the way it warns against: it named one
+definition where there were two.
 
 The bundle's **invariants** — what its frontmatter must say — are tests in
 `crates/bundle-check`, so `check.sh` covers them. They are not listed here; the
