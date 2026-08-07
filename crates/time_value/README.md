@@ -2,9 +2,6 @@
 
 Type-safe time-value-of-money calculations.
 
-Future value under simple interest, `FV = PV(1 + rt)`, is implemented. Nothing
-else is yet.
-
 ```rust
 use time_value::{Amount, ElapsedPeriods, SimpleInterestRate, Tolerance, future_value};
 
