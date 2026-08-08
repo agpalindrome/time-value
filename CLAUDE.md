@@ -7,8 +7,20 @@ crates.io as `time_value` (the GitHub repo is `time-value`, kebab-cased per the
 org ruleset).
 
 One published crate, `crates/time_value`, built against the Knowledge Bundle
-described below, plus `crates/bundle-check` — internal, unpublished — whose
-tests assert the bundle's own invariants.
+described below. Beside it, unpublished: `crates/bundle-check`, whose tests
+assert the bundle's own invariants, and `crates/time-value-cli`, which installs
+the `time-value` binary.
+
+**The cadence is library, then CLI, then MCP.** A feature is modelled and built
+in `time_value`, exposed in the CLI once it is ready, and exposed in an MCP
+server after that. There is no schedule and no cycle — we build when we want to
+and expose a feature when it is ready. The MCP surface is tracked in
+[#153](https://github.com/ojhermann-org/time-value/issues/153) and does not
+exist yet.
+
+A surface never validates. Every value is built by the library's constructors,
+so a binary parses text, calls one operation and renders the answer — putting a
+rule in two places is how the two come to disagree.
 
 ## The Knowledge Bundle comes first
 

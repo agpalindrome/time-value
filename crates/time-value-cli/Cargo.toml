@@ -1,0 +1,28 @@
+[package]
+name        = "time-value-cli"
+description = "Command-line interface for time_value: type-safe time-value-of-money calculations"
+version     = "0.0.0"
+# Non-core crate, and its surface is still moving. Publishing is the owner's
+# call and is never inferred from the work looking finished.
+publish = false
+
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+repository.workspace   = true
+
+# The crate is `time-value-cli` because `time_value` is the library; the command
+# a user types is the shorter one. Carried over from the CLI this repo had before
+# the rewrite, where the same split was made deliberately.
+[[bin]]
+name = "time-value"
+path = "src/main.rs"
+
+[dependencies]
+clap       = { workspace = true }
+time_value = { workspace = true }
+
+# Load-bearing: without it this crate gets none of the workspace lint
+# configuration.
+[lints]
+workspace = true

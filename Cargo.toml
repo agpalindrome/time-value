@@ -2,7 +2,7 @@
 # Required: a virtual workspace does not infer the resolver from its members and
 # silently defaults to 1.
 resolver = "3"
-members = ["crates/bundle-check", "crates/time_value"]
+members = ["crates/bundle-check", "crates/time-value-cli", "crates/time_value"]
 
 [workspace.package]
 edition      = "2024"
@@ -21,6 +21,16 @@ repository   = "https://github.com/ojhermann-org/time-value"
 # rather than a looser range, and its `#[non_exhaustive]` types are matched with
 # a wildcard arm rather than exhaustively.
 okf-graph = "0.1"
+
+# The library, for the binaries that expose it. A path dependency with no
+# version: nothing here is published, and `deny.toml` already permits a wildcard
+# path for exactly this reason.
+time_value = { path = "crates/time_value" }
+
+# Argument parsing for the CLI. Earned rather than assumed: the `--rate` /
+# `--rate-percent` exclusivity is a rule the parser enforces, and hand-rolling
+# it would restate in code what a `[group]` attribute says once.
+clap = { version = "4.6", features = ["derive"] }
 
 # Levels are authoritative here; CI adds no `-D warnings`. Every member needs
 # `[lints] workspace = true` or it silently gets none of this.

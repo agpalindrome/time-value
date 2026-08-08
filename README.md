@@ -3,8 +3,13 @@
 Type-safe time-value-of-money calculations in Rust.
 
 A Cargo workspace whose published crate is [`time_value`](crates/time_value).
-`crates/bundle-check` sits beside it, unpublished, and exists so the knowledge
-bundle's invariants are asserted rather than eyeballed.
+Two unpublished crates sit beside it: [`time-value-cli`](crates/time-value-cli),
+which installs the `time-value` command, and `crates/bundle-check`, which exists
+so the knowledge bundle's invariants are asserted rather than eyeballed.
+
+The library comes first and the surfaces follow it — a feature is modelled and
+built in `time_value`, then exposed in the CLI, then in an MCP server. A surface
+validates nothing of its own.
 
 Nothing here is published. The `0.1.0`–`0.8.0` series on crates.io is a
 separate, immutable history that this line does not continue.
