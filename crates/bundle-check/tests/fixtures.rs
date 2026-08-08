@@ -1,21 +1,20 @@
-//! The red side: every invariant, watched failing for its own reason.
+//! The red side: every requirement, watched failing for its own reason.
 //!
 //! `bundle.rs` asserts the real tree is clean, which is worth having and proves
-//! nothing about the checks themselves — an invariant that stopped examining
+//! nothing about the checks themselves — a requirement that stopped examining
 //! anything would pass it in silence. The bundle's own rule is that a check is
-//! not believed until it has been seen to go red, and until now that had been
+//! not believed until it has been seen to go red, and until #147 that had been
 //! done once, by hand, against a bundle broken on purpose and then thrown away.
 //!
-//! Each fixture below is a minimal bundle breaking exactly one invariant, so
-//! the assertion is both that the right rule fires *and* that nothing else
+//! Each fixture below is a minimal bundle breaking exactly one requirement, so
+//! the assertion is both that the right code fires *and* that nothing else
 //! does. The second half is the one that catches an over-broad check.
 //!
-//! Six of them fire [`Rule::SpecDefect`], which is one rule covering every
-//! conformance failure `okf-graph` finds — so those assert the finding's code
-//! as well, or a fixture would only prove that *something* was wrong. Their
-//! value is not to test the dependency, which has its own suite: it is to prove
-//! the wiring is live, and that each shape this repo cares about still reaches
-//! a failing assertion here.
+//! **Spec codes appear here for two reasons only.** Their red side is
+//! `okf-graph`'s own test suite, so re-testing the dependency is not the point:
+//! it is to prove the wiring is live, and — for `dangling-link` — that this
+//! repo's *denial* of a tolerated finding actually fails a run. That denial is
+//! ours, so its red side is ours too.
 //!
 //! The fixtures are `.md` files in the tree, so `prettier` and `typos` run over
 //! them like any other. Break the frontmatter, never the markdown: a formatter
@@ -24,7 +23,8 @@
 
 use std::path::{Path, PathBuf};
 
-use bundle_check::{Rule, Violation, check};
+use bundle_check::{EMPTY_BUNDLE, HOUSE_CODES, Violation, check, house_checks};
+use okf_graph::Level;
 
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -32,29 +32,26 @@ fn fixture(name: &str) -> PathBuf {
         .join(name)
 }
 
-/// The rules a fixture reports, in order.
-fn rules(name: &str) -> Vec<Rule> {
-    violations(name).into_iter().map(|v| v.rule).collect()
-}
-
 fn violations(name: &str) -> Vec<Violation> {
     check(&fixture(name)).expect("a fixture should be readable")
 }
 
-/// Asserts a fixture reports exactly one spec finding, of `rule`, and that it
-/// is the `okf-graph` rule `code` names.
+/// The codes a fixture reports, in order.
+fn codes(name: &str) -> Vec<String> {
+    violations(name)
+        .into_iter()
+        .map(|violation| violation.code)
+        .collect()
+}
+
+/// Asserts a fixture reports exactly `expected`, at `level`.
 #[track_caller]
-fn only_spec_finding(name: &str, rule: Rule, code: &str) {
+fn only(name: &str, expected: &[&str], level: Level) {
     let found = violations(name);
-    assert_eq!(rules(name), [rule], "{name}: {found:?}");
-    let detail = found
-        .first()
-        .map(|violation| violation.detail.as_str())
-        .expect("the assertion above found exactly one violation");
-    assert!(
-        detail.starts_with(code),
-        "{name}: expected {code}, got {found:?}"
-    );
+    assert_eq!(codes(name), expected, "{name}: {found:?}");
+    for violation in &found {
+        assert_eq!(violation.level, level, "{name}: {violation}");
+    }
 }
 
 /// The green case the red fixtures are measured against. Without it, a checker
@@ -62,20 +59,34 @@ fn only_spec_finding(name: &str, rule: Rule, code: &str) {
 #[test]
 fn a_clean_bundle_reports_nothing() {
     assert_eq!(
-        rules("clean"),
-        [],
-        "clean fixture: {:?}",
+        codes("clean"),
+        Vec::<String>::new(),
+        "{:?}",
         violations("clean")
     );
 }
 
-/// A `.md` that is not a concept document at all. Reported rather than skipped:
-/// a document nobody can read is not a document that passes — and note it
-/// leaves the bundle with no concepts without being empty, which is why
-/// [`Rule::EmptyBundle`] asks for silence as well as emptiness.
+/// Registering the checks cannot fail for a fixed list of unique literals that
+/// avoid the spec's codes — and `house_checks` panics rather than proving it,
+/// so this is where the claim is exercised instead of asserted in a doc
+/// comment.
+#[test]
+fn registers_every_house_check() {
+    let checks = house_checks();
+    assert_eq!(checks.len(), HOUSE_CODES.len() - 1, "TV-0 is not a Check");
+    for code in HOUSE_CODES {
+        if code != EMPTY_BUNDLE {
+            assert!(checks.contains(code), "{code} is not registered");
+        }
+    }
+}
+
+/// A `.md` that is not a concept document at all — and note it leaves the
+/// bundle with no concepts without being empty, which is why the empty-bundle
+/// guard asks for silence as well as emptiness.
 #[test]
 fn a_document_with_no_frontmatter_is_unparsable() {
-    only_spec_finding("unparsable", Rule::SpecDefect, "CONCEPT-1");
+    only("unparsable", &["CONCEPT-1"], Level::Defect);
 }
 
 /// A bundle of nothing but reserved files holds no concepts, and a check that
@@ -83,13 +94,13 @@ fn a_document_with_no_frontmatter_is_unparsable() {
 /// prevent, so the emptiness is itself a violation.
 #[test]
 fn a_bundle_with_no_concepts_is_a_violation() {
-    assert_eq!(rules("reserved-only"), [Rule::EmptyBundle]);
+    only("reserved-only", &[EMPTY_BUNDLE], Level::Defect);
 }
 
 /// §11 rule 2, the spec's one required key.
 #[test]
 fn a_concept_with_no_type_is_reported() {
-    only_spec_finding("no-type", Rule::SpecDefect, "CONCEPT-2");
+    only("no-type", &["CONCEPT-2"], Level::Defect);
 }
 
 /// A status outside the three §5.4 names. The fixture says `provisional` rather
@@ -98,106 +109,99 @@ fn a_concept_with_no_type_is_reported() {
 /// `scripts/check.sh` gained in #145. The code path is the same.
 #[test]
 fn a_status_the_spec_does_not_define_is_reported() {
-    only_spec_finding("invalid-status", Rule::SpecDefect, "CONCEPT-3");
+    only("invalid-status", &["CONCEPT-3"], Level::Defect);
 }
 
 /// `status: true` is not a string, and reads as no recognised status at all.
-/// Kept as a second fixture beside `invalid-status` even though both now land
-/// on `CONCEPT-3`: the local checker used to distinguish them, and the two
-/// input shapes are the reason the distinction was written in the first place.
+/// Kept beside `invalid-status` even though both land on `CONCEPT-3`: two input
+/// shapes, one rule, and `Frontmatter::scalar` is now public if the distinction
+/// is ever worth drawing again.
 #[test]
 fn a_status_that_is_not_a_string_is_reported() {
-    only_spec_finding("non-string-status", Rule::SpecDefect, "CONCEPT-3");
+    only("non-string-status", &["CONCEPT-3"], Level::Defect);
 }
 
 /// A bare token is neither `<producer>/<version>` nor `<scheme>:<id>`.
 #[test]
 fn an_actor_matching_no_accepted_form_is_reported() {
-    only_spec_finding("malformed-actor", Rule::SpecDefect, "CONCEPT-5");
+    only("malformed-actor", &["CONCEPT-5"], Level::Defect);
 }
 
 /// `2026-W01-1T00:00:00Z` is twenty characters with separators at 4 and 10 and
-/// a trailing `Z`, so the length-and-separators version of this check passed it
-/// — and `W` sorts above every digit, so it compared as newer than any calendar
-/// date and defeated the staleness check at the same time. It is here because
-/// it is the case that actually got through, and it stays here now that the
-/// comparison is on parsed instants: what a week date must never do is compare
-/// at all.
+/// a trailing `Z`, so the length-and-separators check this crate once used
+/// passed it — and `W` sorts above every digit, so it compared as newer than
+/// any calendar date and defeated the staleness check at the same time. It
+/// stays now that the comparison is on parsed instants: what a week date must
+/// never do is compare at all.
 #[test]
 fn a_week_date_timestamp_is_reported() {
-    only_spec_finding("week-date-timestamp", Rule::SpecDefect, "CONCEPT-12");
+    only("week-date-timestamp", &["CONCEPT-12"], Level::Defect);
 }
 
-/// A body link to a concept nobody wrote. The spec says to tolerate it and
-/// `okf-graph` exits zero on it; this repo fails, because a report from a
-/// passing test is a report nobody reads.
+/// The denial, made visible. `okf-graph` calls a dangling link a tolerated
+/// report and exits zero on it; here it is a **defect**, because the link is
+/// one this repo wrote. That is the principle's rule with a fixture behind it
+/// rather than only a table.
 #[test]
-fn a_dangling_link_is_reported_though_the_spec_tolerates_it() {
-    only_spec_finding("dangling-link", Rule::SpecReport, "BUNDLE-2");
+fn a_dangling_link_is_a_defect_because_the_link_is_ours() {
+    only("dangling-link", &["BUNDLE-2"], Level::Defect);
 }
 
 /// The spec requires only `generated.by`; this repo also requires `at`, because
 /// staleness is measured against it. The fixture carries the spec's half alone,
-/// so it is conformant and still rejected here — which is the deviation stated
-/// on the rule, made visible.
+/// so it is conformant and still rejected here — the deviation made visible.
 #[test]
 fn a_generated_block_without_at_is_reported() {
-    assert_eq!(rules("missing-generated-at"), [Rule::MissingGenerated]);
+    only("missing-generated-at", &["TV-2"], Level::Defect);
 }
 
-/// No `generated` family at all, which §4.1 permits outright. Its own fixture
-/// because it is a different branch: a *declared* block missing `by` is
-/// `okf-graph`'s `CONCEPT-4`, so the `by` half of this rule fires only here,
-/// and a branch nothing exercises is a branch nobody has seen work.
+/// No `generated` family at all, which §4.1 permits outright. Both house halves
+/// fire and the spec's `CONCEPT-4` does not, because that one keys off the
+/// family being declared — which is what keeps the two from saying the same
+/// thing twice.
 #[test]
-fn a_concept_with_no_generated_family_is_reported_twice() {
-    assert_eq!(
-        rules("no-generated"),
-        [Rule::MissingGenerated, Rule::MissingGenerated],
-        "{:?}",
-        violations("no-generated")
-    );
+fn a_concept_with_no_generated_family_reports_both_halves() {
+    only("no-generated", &["TV-1", "TV-2"], Level::Defect);
 }
 
 /// Stable means ready for consumption. Saying so with nobody having confirmed
 /// it is the claim this catches.
 #[test]
 fn a_stable_concept_nobody_verified_is_reported() {
-    assert_eq!(rules("stable-unverified"), [Rule::StableUnverified]);
+    only("stable-unverified", &["TV-3"], Level::Defect);
 }
 
-/// The invariant the whole crate exists for.
+/// The requirement the whole crate exists for.
 #[test]
 fn a_verification_older_than_the_content_is_reported() {
-    assert_eq!(rules("stale-verification"), [Rule::StaleVerification]);
+    only("stale-verification", &["TV-4"], Level::Defect);
 }
 
-/// Every rule has a fixture that fires it. A rule added without one is a check
-/// nobody has watched fail, which is the state this file exists to end.
+/// Every code this crate reports on its own authority has a fixture that fires
+/// it. One added without one is a check nobody has watched fail, which is the
+/// state this file exists to end.
 ///
-/// What this does *not* check is that `Rule::ALL` is complete — a variant left
+/// What this does *not* check is that `HOUSE_CODES` is complete — a code left
 /// out of that list is invisible here, and no test can see what it was never
-/// given. `Rule::ALL` says so at its definition, and the compiler puts whoever
-/// adds a variant two lines from it. Stating the scope is the point: an
-/// unqualified "every rule" is the completeness claim this bundle now has a
-/// principle about.
+/// given. `HOUSE_CODES` says so at its definition. Stating the scope is the
+/// point: an unqualified "every rule" is the completeness claim this bundle now
+/// has a principle about.
 #[test]
-fn every_rule_has_a_fixture_that_triggers_it() {
+fn every_house_code_has_a_fixture_that_triggers_it() {
     let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
-    let triggered: Vec<Rule> = std::fs::read_dir(&directory)
+    let triggered: Vec<String> = std::fs::read_dir(&directory)
         .expect("the fixtures directory should be readable")
         .filter_map(|entry| entry.ok().map(|e| e.path()))
         .filter(|path| path.is_dir())
         .filter_map(|path| check(&path).ok())
         .flatten()
-        .map(|violation| violation.rule)
+        .map(|violation| violation.code)
         .collect();
 
-    for rule in Rule::ALL {
+    for code in HOUSE_CODES {
         assert!(
-            triggered.contains(&rule),
-            "no fixture triggers {}",
-            rule.name()
+            triggered.iter().any(|fired| fired == code),
+            "no fixture triggers {code}"
         );
     }
 }

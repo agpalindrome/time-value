@@ -20,7 +20,7 @@ repository   = "https://github.com/ojhermann-org/time-value"
 # Pre-1.0, and its own changelog says a minor bump may break the API — so `0.1`
 # rather than a looser range, and its `#[non_exhaustive]` types are matched with
 # a wildcard arm rather than exhaustively.
-okf-graph = "0.1"
+okf-graph = "0.2"
 
 # The library, for the binaries that expose it. A path dependency with no
 # version: nothing here is published, and `deny.toml` already permits a wildcard

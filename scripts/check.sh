@@ -46,10 +46,10 @@ CHECKS=(
   # rather than in flake.lock.
   #
   # One consequence to know about: okf-graph exits 0 on a *report* (a dangling
-  # link, an out-of-order log entry) and used to print it here. A passing test
-  # prints nothing, so bundle-check fails on a report instead. That is stricter
-  # than the spec, which says a consumer MUST NOT reject a bundle for one, and
-  # the rule says so where it is defined.
+  # link, an out-of-order log entry) and used to print it here. Five of those are
+  # defects in this repo's own bundle and the rest are not — the test is whether
+  # the material is ours to fix, and the bundle's producer-not-consumer principle
+  # holds the table. bundle-check applies it as a Policy and asserts it.
   "clippy|cargo clippy --workspace --all-targets --locked"
   "test|cargo nextest run --workspace --locked"
   "doctest|cargo test --doc --workspace --locked"
