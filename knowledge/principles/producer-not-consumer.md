@@ -6,6 +6,7 @@ description:
   producer, so a finding about our own material is a defect here.
 tags: [standing-rule, process]
 status: stable
+verified: { by: human:ojhermann, at: 2026-08-08T16:01:35Z }
 generated: { by: claude/opus-5, at: 2026-08-08T15:58:48Z }
 sources:
   - id: okf-spec
