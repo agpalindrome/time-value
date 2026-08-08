@@ -1,5 +1,21 @@
 # Directory Update Log
 
+## 2026-08-08
+
+- **Update**: Recorded in
+  [the bundle is revisable](principles/the-bundle-is-revisable.md) that a
+  constraint adopted for an implementation's convenience is labelled with the
+  implementation or it outlives it. The instance: the frontmatter check demanded
+  every timestamp end in `Z`, which the spec does not, purely because staleness
+  was compared on strings — and it came out cleanly today only because the rule
+  said so where it was defined.
+- **Update**: Corrected
+  [code and bundle change together](principles/code-and-bundle-change-together.md),
+  which told a reader to run `okf-graph` after touching the bundle. `okf-graph`
+  is now a crate rather than a binary in the devshell, so the instruction named
+  something no longer there; the checks it belongs to are
+  `./scripts/check.sh test`.
+
 ## 2026-08-07
 
 - **Update**: Recorded in

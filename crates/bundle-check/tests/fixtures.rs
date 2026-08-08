@@ -10,6 +10,13 @@
 //! the assertion is both that the right rule fires *and* that nothing else
 //! does. The second half is the one that catches an over-broad check.
 //!
+//! Six of them fire [`Rule::SpecDefect`], which is one rule covering every
+//! conformance failure `okf-graph` finds — so those assert the finding's code
+//! as well, or a fixture would only prove that *something* was wrong. Their
+//! value is not to test the dependency, which has its own suite: it is to prove
+//! the wiring is live, and that each shape this repo cares about still reaches
+//! a failing assertion here.
+//!
 //! The fixtures are `.md` files in the tree, so `prettier` and `typos` run over
 //! them like any other. Break the frontmatter, never the markdown: a formatter
 //! that decides to repair a fixture would quietly rewrite the thing under test,
@@ -34,6 +41,22 @@ fn violations(name: &str) -> Vec<Violation> {
     check(&fixture(name)).expect("a fixture should be readable")
 }
 
+/// Asserts a fixture reports exactly one spec finding, of `rule`, and that it
+/// is the `okf-graph` rule `code` names.
+#[track_caller]
+fn only_spec_finding(name: &str, rule: Rule, code: &str) {
+    let found = violations(name);
+    assert_eq!(rules(name), [rule], "{name}: {found:?}");
+    let detail = found
+        .first()
+        .map(|violation| violation.detail.as_str())
+        .expect("the assertion above found exactly one violation");
+    assert!(
+        detail.starts_with(code),
+        "{name}: expected {code}, got {found:?}"
+    );
+}
+
 /// The green case the red fixtures are measured against. Without it, a checker
 /// that reported everything would pass every test below.
 #[test]
@@ -47,10 +70,12 @@ fn a_clean_bundle_reports_nothing() {
 }
 
 /// A `.md` that is not a concept document at all. Reported rather than skipped:
-/// a document nobody can read is not a document that passes.
+/// a document nobody can read is not a document that passes — and note it
+/// leaves the bundle with no concepts without being empty, which is why
+/// [`Rule::EmptyBundle`] asks for silence as well as emptiness.
 #[test]
 fn a_document_with_no_frontmatter_is_unparsable() {
-    assert_eq!(rules("unparsable"), [Rule::Unparsable]);
+    only_spec_finding("unparsable", Rule::SpecDefect, "CONCEPT-1");
 }
 
 /// A bundle of nothing but reserved files holds no concepts, and a check that
@@ -64,7 +89,7 @@ fn a_bundle_with_no_concepts_is_a_violation() {
 /// §11 rule 2, the spec's one required key.
 #[test]
 fn a_concept_with_no_type_is_reported() {
-    assert_eq!(rules("no-type"), [Rule::MissingType]);
+    only_spec_finding("no-type", Rule::SpecDefect, "CONCEPT-2");
 }
 
 /// A status outside the three §5.4 names. The fixture says `provisional` rather
@@ -73,28 +98,42 @@ fn a_concept_with_no_type_is_reported() {
 /// `scripts/check.sh` gained in #145. The code path is the same.
 #[test]
 fn a_status_the_spec_does_not_define_is_reported() {
-    assert_eq!(rules("invalid-status"), [Rule::InvalidStatus]);
+    only_spec_finding("invalid-status", Rule::SpecDefect, "CONCEPT-3");
 }
 
-/// `status: true` reads as `None` exactly like an absent key. A checker
-/// treating the two alike passes over the malformed one, which is why
-/// `Frontmatter` records whether the key was there at all.
+/// `status: true` is not a string, and reads as no recognised status at all.
+/// Kept as a second fixture beside `invalid-status` even though both now land
+/// on `CONCEPT-3`: the local checker used to distinguish them, and the two
+/// input shapes are the reason the distinction was written in the first place.
 #[test]
 fn a_status_that_is_not_a_string_is_reported() {
-    assert_eq!(rules("non-string-status"), [Rule::InvalidStatus]);
-    assert!(
-        violations("non-string-status")[0]
-            .detail
-            .contains("not a string"),
-        "the detail should say why, not just that: {:?}",
-        violations("non-string-status")
-    );
+    only_spec_finding("non-string-status", Rule::SpecDefect, "CONCEPT-3");
 }
 
 /// A bare token is neither `<producer>/<version>` nor `<scheme>:<id>`.
 #[test]
 fn an_actor_matching_no_accepted_form_is_reported() {
-    assert_eq!(rules("malformed-actor"), [Rule::MalformedActor]);
+    only_spec_finding("malformed-actor", Rule::SpecDefect, "CONCEPT-5");
+}
+
+/// `2026-W01-1T00:00:00Z` is twenty characters with separators at 4 and 10 and
+/// a trailing `Z`, so the length-and-separators version of this check passed it
+/// — and `W` sorts above every digit, so it compared as newer than any calendar
+/// date and defeated the staleness check at the same time. It is here because
+/// it is the case that actually got through, and it stays here now that the
+/// comparison is on parsed instants: what a week date must never do is compare
+/// at all.
+#[test]
+fn a_week_date_timestamp_is_reported() {
+    only_spec_finding("week-date-timestamp", Rule::SpecDefect, "CONCEPT-12");
+}
+
+/// A body link to a concept nobody wrote. The spec says to tolerate it and
+/// `okf-graph` exits zero on it; this repo fails, because a report from a
+/// passing test is a report nobody reads.
+#[test]
+fn a_dangling_link_is_reported_though_the_spec_tolerates_it() {
+    only_spec_finding("dangling-link", Rule::SpecReport, "BUNDLE-2");
 }
 
 /// The spec requires only `generated.by`; this repo also requires `at`, because
@@ -104,6 +143,20 @@ fn an_actor_matching_no_accepted_form_is_reported() {
 #[test]
 fn a_generated_block_without_at_is_reported() {
     assert_eq!(rules("missing-generated-at"), [Rule::MissingGenerated]);
+}
+
+/// No `generated` family at all, which §4.1 permits outright. Its own fixture
+/// because it is a different branch: a *declared* block missing `by` is
+/// `okf-graph`'s `CONCEPT-4`, so the `by` half of this rule fires only here,
+/// and a branch nothing exercises is a branch nobody has seen work.
+#[test]
+fn a_concept_with_no_generated_family_is_reported_twice() {
+    assert_eq!(
+        rules("no-generated"),
+        [Rule::MissingGenerated, Rule::MissingGenerated],
+        "{:?}",
+        violations("no-generated")
+    );
 }
 
 /// Stable means ready for consumption. Saying so with nobody having confirmed
@@ -117,16 +170,6 @@ fn a_stable_concept_nobody_verified_is_reported() {
 #[test]
 fn a_verification_older_than_the_content_is_reported() {
     assert_eq!(rules("stale-verification"), [Rule::StaleVerification]);
-}
-
-/// `2026-W01-1T00:00:00Z` is twenty characters with separators at 4 and 10 and
-/// a trailing `Z`, so the length-and-separators version of this check passed it
-/// — and `W` sorts above every digit, so it compared as newer than any calendar
-/// date and defeated the staleness check at the same time. It is here because
-/// it is the case that actually got through.
-#[test]
-fn a_week_date_timestamp_is_reported() {
-    assert_eq!(rules("week-date-timestamp"), [Rule::MalformedTimestamp]);
 }
 
 /// Every rule has a fixture that fires it. A rule added without one is a check

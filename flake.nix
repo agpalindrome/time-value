@@ -11,14 +11,10 @@
       url = "github:cachix/git-hooks.nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    # Validates the knowledge bundle's structure and links. Taken as a locked
-    # input rather than run as `nix run github:...`: a bare flake ref follows
-    # that repo's main, so the checker could change between two runs of this
-    # one. Update it deliberately with `nix flake update okf-tools`.
-    okf-tools = {
-      url = "github:ojhermann-org/okf-tools";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
+    # No okf-tools input. It carried the `okf-graph` binary that validated the
+    # knowledge bundle's structure and links until 2026-08-08, when okf-graph was
+    # published as a crate: crates/bundle-check depends on it directly, so the
+    # checker is pinned in Cargo.lock and updated with `cargo update okf-graph`.
   };
 
   outputs =
@@ -26,7 +22,6 @@
       nixpkgs,
       rust-overlay,
       git-hooks,
-      okf-tools,
       ...
     }:
     let
@@ -49,10 +44,6 @@
           # A second component, not a second pin: most of rustfmt.toml is
           # nightly-only and stable ignores it silently.
           nightlyRustfmt = pkgs.rust-bin.nightly."2026-08-01".rustfmt;
-
-          # Carries `okf-graph`, which validates the bundle's structure and
-          # links — the half `crates/bundle-check` does not cover.
-          okfGraph = okf-tools.packages.${system}.default;
 
           fmtCheck = pkgs.writeShellScriptBin "tv-fmt-check" ''
             export RUSTFMT="${nightlyRustfmt}/bin/rustfmt"
@@ -92,7 +83,6 @@
             nightlyRustfmt
             fmtCheck
             preCommit
-            okfGraph
             ;
         };
 
@@ -113,7 +103,6 @@
             packages = [
               env.rustToolchain
               env.fmtCheck
-              env.okfGraph
               pkgs.bacon
               pkgs.cargo-nextest
               pkgs.cargo-deny

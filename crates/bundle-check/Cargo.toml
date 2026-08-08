@@ -9,8 +9,15 @@ rust-version.workspace = true
 license.workspace      = true
 repository.workspace    = true
 
+# A dependency rather than a dev-dependency, though nothing here ships: the
+# checks live in `src/` so `tests/fixtures.rs` can point a deliberately broken
+# bundle at them, and a dev-dependency is invisible to `src/`. Moving them into a
+# module shared by both test binaries was the alternative, and the workspace's
+# `unused = "deny"` makes it a build failure — measured 2026-08-08: `dead_code`
+# fires per test binary, so any item one file does not use breaks the other.
+# `publish = false` above is what keeps this out of the published crate.
 [dependencies]
-saphyr = { workspace = true }
+okf-graph = { workspace = true }
 
 [lints]
 workspace = true

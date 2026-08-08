@@ -59,7 +59,9 @@ list in two places is a list that goes stale in one of them.
   verification visibly stale, so do not skip it to keep a concept looking fresh.
 - **Never write a `verified` entry yourself.** It asserts a human read and
   confirmed the content. Ask.
-- **Run `okf-graph` after every change** — see Verification.
+- **Run the bundle's checks after every change** —
+  `nix develop -c ./scripts/check.sh test`, which is where `okf-graph` now runs;
+  see Verification.
 
 ## Design principles
 
@@ -125,22 +127,29 @@ The sentence above said "the only definition of what must **pass**" until
 2026-08-07, which was false in exactly the way it warns against: it named one
 definition where there were two.
 
-The bundle is checked in two halves, and both are in `check.sh`. Its
-**invariants** — what its frontmatter must say — are tests in
-`crates/bundle-check`; they are not listed here, because the tests are their
-definition. Its **structure and links** are `okf-graph`, which comes from
-`okf-tools` as a locked flake input and runs as the `bundle` check.
+The bundle is checked entirely by the tests in `crates/bundle-check`, which are
+not listed here because the tests are their definition. Both halves are there:
+the OKF spec's own conformance rules come from
+[`okf-graph`](https://crates.io/crates/okf-graph), which that crate depends on,
+and the house rules — stricter than the spec, and each labelled as such where it
+is defined — are its own.
 
-`okf-graph` exits non-zero on a **defect** and zero on a **report**, so a
-dangling cross-link prints and does not fail the run. That is the spec's own
-split — §6 and §11 say a broken link MUST NOT be rejected — so read what the
-check printed, not only whether it passed.
-
-Update the checker deliberately, never as a side effect:
+There was a second half until 2026-08-08: the same `okf-graph`, as a binary from
+an `okf-tools` flake input, run as a `bundle` step in `check.sh`. The crate does
+that job too now, so the checker's version is pinned in `Cargo.lock` beside
+every other dependency rather than in `flake.lock`. Update it deliberately,
+never as a side effect:
 
 ```sh
-nix flake update okf-tools
+cargo update okf-graph
 ```
+
+One behaviour changed with the move, and it is the strictest thing in the repo.
+`okf-graph` exits zero on a **report** — a dangling cross-link, an out-of-order
+log entry — because §6 and §11 say a consumer MUST NOT reject a bundle for one,
+and the old step printed it. A passing test prints nothing, so `bundle-check`
+**fails** on a report instead. That is a claim about this bundle and not about
+the spec; accepting a report means editing `Rule::SpecReport` on purpose.
 
 ## CI and releases
 
