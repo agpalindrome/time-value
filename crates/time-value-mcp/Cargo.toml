@@ -1,0 +1,42 @@
+[package]
+name        = "time-value-mcp"
+description = "Model Context Protocol server exposing time_value's calculations as tools"
+version     = "0.0.0"
+# Non-core crate, and its surface is still moving. Publishing is the owner's
+# call and is never inferred from the work looking finished.
+publish = false
+
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+repository.workspace   = true
+
+[[bin]]
+name = "time-value-mcp"
+path = "src/main.rs"
+
+[dependencies]
+# The MCP transport and its runtime. Async lives only in this crate; the library
+# stays synchronous, and the tools call it directly.
+#
+# `transport-io` is what supplies server-side stdio and is **not** implied by
+# `server` — read from the feature table, then confirmed by the build failing
+# without it.
+rmcp      = { workspace = true }
+schemars  = { workspace = true }
+serde     = { workspace = true }
+tokio     = { workspace = true }
+time_value = { workspace = true }
+
+# Only the tests speak JSON directly: they assert on the schema and the wire
+# shapes, which is exactly where hand-built strings would stop being safe. Note
+# the `float_roundtrip` feature on the workspace dependency — without it a test
+# comparing a parsed answer against a literal fails for a reason that has nothing
+# to do with this crate.
+[dev-dependencies]
+serde_json = { workspace = true }
+
+# Load-bearing: without it this crate gets none of the workspace lint
+# configuration.
+[lints]
+workspace = true

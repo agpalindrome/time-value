@@ -2,7 +2,12 @@
 # Required: a virtual workspace does not infer the resolver from its members and
 # silently defaults to 1.
 resolver = "3"
-members = ["crates/bundle-check", "crates/time-value-cli", "crates/time_value"]
+members = [
+  "crates/bundle-check",
+  "crates/time-value-cli",
+  "crates/time-value-mcp",
+  "crates/time_value",
+]
 
 [workspace.package]
 edition      = "2024"
@@ -31,6 +36,19 @@ time_value = { path = "crates/time_value" }
 # `--rate-percent` exclusivity is a rule the parser enforces, and hand-rolling
 # it would restate in code what a `[group]` attribute says once.
 clap = { version = "4.6", features = ["derive"] }
+
+# The MCP server's transport, schema generation and runtime. Confined to
+# `crates/time-value-mcp`: the library stays synchronous and depends on none of
+# them, which is why they are not features of it.
+rmcp = { version = "3.1", features = ["server", "macros", "transport-io"] }
+schemars = "1"
+serde = { version = "1", features = ["derive"] }
+# `float_roundtrip` is not cosmetic. Measured 2026-08-08: without it,
+# `from_str` reads `114.99999999999999` back as `115.0` — serialisation is exact
+# (ryu), deserialisation is not. Every number this workspace puts on a wire is
+# an f64 whose last digits are the point.
+serde_json = { version = "1", features = ["float_roundtrip"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std"] }
 
 # Levels are authoritative here; CI adds no `-D warnings`. Every member needs
 # `[lints] workspace = true` or it silently gets none of this.
