@@ -156,12 +156,19 @@ never as a side effect:
 cargo update okf-graph
 ```
 
-One behaviour changed with the move, and it is the strictest thing in the repo.
-`okf-graph` exits zero on a **report** — a dangling cross-link, an out-of-order
-log entry — because §6 and §11 say a consumer MUST NOT reject a bundle for one,
-and the old step printed it. A passing test prints nothing, so `bundle-check`
-**fails** on a report instead. That is a claim about this bundle and not about
-the spec; accepting a report means editing `Rule::SpecReport` on purpose.
+**Which of the spec's tolerated findings fail here is the bundle's decision, not
+this crate's.** `okf-graph` exits zero on a report — a dangling cross-link, an
+out-of-order log entry — because §6 and §11 say a consumer MUST NOT reject a
+bundle for one. Five of them are defects here and the rest are not, on the test
+that the material is ours to fix, and
+[we are this bundle's producer, not its consumer](knowledge/principles/producer-not-consumer.md)
+holds the table. `bundle-check`'s `policy` implements it and a test asserts the
+levels match, so the two cannot drift.
+
+Between 2026-08-08 and adopting `okf-graph` 0.2, **every** report failed — a
+blanket rule adopted because the old binary printed them and a passing test
+prints nothing. Rule levels replaced it with the per-rule decision that was
+wanted all along.
 
 ## CI and releases
 

@@ -147,9 +147,9 @@ checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
 name = "okf-graph"
-version = "0.1.0"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cf66a7cae325c8d8ae4623d321713f2f162f8dc9b8392120c6777cb2459516d1"
+checksum = "24f4a98a5301c9365025d6c27a9f08c6148744e3e47c57ce1df8cf86956dd962"
 dependencies = [
  "serde_yaml",
 ]
