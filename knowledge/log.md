@@ -2,6 +2,21 @@
 
 ## 2026-08-08
 
+- **Correction**: Reversed a claim in
+  [simple accumulation factor](domain/simple-accumulation-factor.md) that a
+  decimal representation without a fused multiply-add "computes different
+  answers about which inputs are legal". It conflates having no fused operation
+  with rounding twice. A decimal holds `0.05` exactly and multiplies it exactly
+  within its scale, so it rounds once with nothing fused — and as written the
+  claim disqualified the representation
+  [Amount](domain/amount.md#the-representation-is-a-parameter)'s parameter
+  exists to admit.
+- **Update**: Recorded in [Amount](domain/amount.md) that the requirement a
+  representation must meet is **one rounding at most** in `1 + rt`, not a fused
+  multiply-add — fusion being how binary achieves it — and that the guarantee is
+  therefore per-representation: two representations may each round once and
+  still disagree about a factor near cancellation, because the guard's verdict
+  is a question about how each stored the rate.
 - **Update**: Recorded in
   [the bundle is revisable](principles/the-bundle-is-revisable.md) that a
   constraint adopted for an implementation's convenience is labelled with the

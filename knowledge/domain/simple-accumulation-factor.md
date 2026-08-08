@@ -9,7 +9,8 @@ status: stable
 verified:
   - { by: human:ojhermann, at: 2026-08-07T16:20:15Z }
   - { by: human:ojhermann, at: 2026-08-07T18:50:30Z }
-generated: { by: claude/opus-5, at: 2026-08-07T17:36:18Z }
+  - { by: human:ojhermann, at: 2026-08-08T15:26:25Z }
+generated: { by: claude/opus-5, at: 2026-08-08T15:21:30Z }
 sources:
   - id: wikipedia-accum
     resource: https://en.wikipedia.org/wiki/Accumulation_function
@@ -108,20 +109,33 @@ way, and the applying half would be identical. Generalising is deferred until
 there is a second constructor to generalise over — two instances being the point
 at which the shared shape is observed rather than guessed.
 
-# Fused multiply-add is required, not incidental
+# One rounding is required, and in binary that means a fused multiply-add
 
-**Decided — the factor is computed with a single fused rounding.** Measured
-2026-08-07: `1.0 + periods * rate` rounds twice, and the intermediate rounding
-can drive a product that is merely _near_ `-1` to exactly `-1`, destroying the
-sign of the residue. The fused form rounds once and agrees with the exact sign
-of `1 + rt` — checked against a double-double reference over 216,000 pairs,
-16,000 of them adjacent to the boundary, with no disagreement.
+**Decided — the factor is computed with a single rounding.** Measured
+2026-08-07: in a 64-bit binary float, `1.0 + periods * rate` rounds twice, and
+the intermediate rounding can drive a product that is merely _near_ `-1` to
+exactly `-1`, destroying the sign of the residue. The fused form rounds once and
+agrees with the exact sign of `1 + rt` — checked against a double-double
+reference over 216,000 pairs, 16,000 of them adjacent to the boundary, with no
+disagreement.
 
 The two forms disagree about which inputs are valid for 63% of pairs near
 cancellation. So this is not a stylistic preference, and it widens the
 [operations a representation must supply](amount.md#the-representation-is-a-parameter)
-by one: a decimal representation without a fused multiply-add computes different
-answers about which inputs are legal, not merely less precise ones.
+by one — but by **one rounding at most**, not by a fused multiply-add.
+
+**This is a correction.** The claim here read: "a decimal representation without
+a fused multiply-add computes different answers about which inputs are legal,
+not merely less precise ones." That conflates having no fused operation with
+rounding twice, and they are not the same thing. A decimal representation holds
+a rate like `0.05` exactly and multiplies it exactly within its scale, so
+`1 + rt` incurs one rounding there with nothing fused at all. Read as written,
+the old sentence disqualified the representation the
+[parameter](amount.md#the-representation-is-a-parameter) exists to admit —
+`rust_decimal` offers no `mul_add` (read from its documentation on 2026-08-08,
+not exercised) and would meet the requirement regardless. Fusion is how _binary_
+achieves one rounding, because `0.05` is not representable there and the
+intermediate product must not round before the addition.
 
 # Its representation is coupled to Amount's
 
