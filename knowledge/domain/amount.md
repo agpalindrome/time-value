@@ -11,7 +11,7 @@ verified:
   - { by: human:ojhermann, at: 2026-08-07T18:50:30Z }
   - { by: human:ojhermann, at: 2026-08-07T19:07:03Z }
   - { by: human:ojhermann, at: 2026-08-07T22:22:09Z }
-generated: { by: claude/opus-5, at: 2026-08-07T22:06:40Z }
+generated: { by: claude/opus-5, at: 2026-08-08T15:21:30Z }
 sources:
   - id: wikipedia-fv
     resource: https://en.wikipedia.org/wiki/Future_value
@@ -431,6 +431,34 @@ of one formula and not another. This is a true statement about the
 representations rather than a defect: a tool that claimed to compute compound
 interest exactly in a representation that cannot do so would be worse than one
 that declines.
+
+**Derived — one requirement is a constraint on rounding rather than on
+arithmetic, and it is the sharpest one.** `1 + rt` must be computed with **at
+most one rounding** between the operands and the factor. Not a precision
+preference: the [simple accumulation factor](simple-accumulation-factor.md)
+refuses a factor whose sign is indistinguishable from the rounding error in its
+operands, and a second rounding can drive a product that is merely near `-1` to
+exactly `-1`. Measured there over 216,000 pairs, the one-rounding and
+two-rounding forms disagree about **which inputs are legal** for 63% of those
+near cancellation. A representation that rounds twice does not compute the same
+answers less precisely; it computes a different domain.
+
+**Derived — how a representation meets that is its own business, and the
+requirement is not "supply a fused multiply-add".** A 64-bit binary float needs
+fusion, because a rate like `0.05` is not representable and the intermediate
+product must not round before the addition. A decimal representation holds that
+rate exactly and multiplies it exactly within its scale, so it meets the same
+requirement with nothing fused. Stating the requirement as FMA would write a
+binary-specific remedy into a representation-neutral contract, and would exclude
+the decimal representations this parameter exists to admit.
+
+**Derived — so this guarantee is per-representation, and that is worth saying
+plainly.** Two representations may each round once and still disagree about a
+factor near cancellation, because each stores the rate with a different error
+and the guard's verdict is a question about that error. Choosing a
+representation is therefore not only a choice about precision or speed: for
+inputs at the boundary it can change which are accepted. The [domain](#domain)
+below is stable under a change of representation; the boundary is not.
 
 **Derived — a representation choice does not decide the
 [known and unaddressed](#known-and-unaddressed) items below.** Selecting a
