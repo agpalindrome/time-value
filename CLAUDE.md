@@ -8,15 +8,21 @@ org ruleset).
 
 One published crate, `crates/time_value`, built against the Knowledge Bundle
 described below. Beside it, unpublished: `crates/bundle-check`, whose tests
-assert the bundle's own invariants, and `crates/time-value-cli`, which installs
-the `time-value` binary.
+assert the bundle's own invariants, `crates/time-value-cli`, which installs the
+`time-value` binary, and `crates/time-value-mcp`, which serves the same
+operations to an MCP client over stdio.
 
 **The cadence is library, then CLI, then MCP.** A feature is modelled and built
-in `time_value`, exposed in the CLI once it is ready, and exposed in an MCP
-server after that. There is no schedule and no cycle — we build when we want to
-and expose a feature when it is ready. The MCP surface is tracked in
-[#153](https://github.com/ojhermann-org/time-value/issues/153) and does not
-exist yet.
+in `time_value`, exposed in `crates/time-value-cli` once it is ready, and
+exposed in `crates/time-value-mcp` after that. There is no schedule and no cycle
+— we build when we want to and expose a feature when it is ready.
+
+Two rules the surfaces share. **A doc comment on an MCP parameter type is paid
+for on every connection**, because `schemars` copies it into the schema — so
+rationale goes in `//` comments and only instructions go in `///`. And
+**`serde_json` needs its `float_roundtrip` feature** anywhere this workspace
+reads a number back: without it `from_str` turns `114.99999999999999` into
+`115.0`, which is the whole point of the number.
 
 A surface never validates. Every value is built by the library's constructors,
 so a binary parses text, calls one operation and renders the answer — putting a
