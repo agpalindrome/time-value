@@ -2,6 +2,16 @@
 
 ## 2026-08-08
 
+- **Creation**: Added
+  [we are this bundle's producer, not its consumer](principles/producer-not-consumer.md),
+  which states the rule four house rules had each been arguing separately: a
+  tolerance the spec addresses to a consumer is not a licence for the producer,
+  so a finding about material this repo owns is a defect here. It fixes the
+  policy `bundle-check` will apply once `okf-graph` 0.2 lands rule levels —
+  dangling links and an out-of-order log become defects, while a tool's vintage,
+  an unsettled upstream question and a surface we do not use stay reports. The
+  distinction is ownership rather than severity. First concept here to cite the
+  OKF specification as a source, which is the point of it.
 - **Correction**: Reversed a claim in
   [simple accumulation factor](domain/simple-accumulation-factor.md) that a
   decimal representation without a fused multiply-add "computes different

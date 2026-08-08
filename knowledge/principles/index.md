@@ -22,6 +22,9 @@ one names an example, the example is real.
 - [Code and bundle change together](code-and-bundle-change-together.md) - Any
   change to one asks what it means for the other, and anything learned asks
   whether it is a lesson rather than a local fix.
+- [We are this bundle's producer, not its consumer](producer-not-consumer.md) -
+  A tolerance the spec addresses to a consumer is not a licence for the
+  producer, so a finding about our own material is a defect here.
 - [The bundle is revisable](the-bundle-is-revisable.md) - Content, structure and
   decomposition all change as understanding improves; none of it is settled by
   having been written.
