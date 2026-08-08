@@ -9,6 +9,7 @@ status: stable
 verified:
   - { by: human:ojhermann, at: 2026-08-07T16:20:15Z }
   - { by: human:ojhermann, at: 2026-08-07T18:50:30Z }
+  - { by: human:ojhermann, at: 2026-08-08T15:26:25Z }
 generated: { by: claude/opus-5, at: 2026-08-08T15:21:30Z }
 sources:
   - id: wikipedia-accum
