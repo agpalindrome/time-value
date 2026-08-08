@@ -13,7 +13,7 @@ pub mod tolerance;
 mod simple;
 
 pub use amount::Amount;
-pub use error::{Error, Quantity, Result};
+pub use error::{Error, Kind, Quantity, Result};
 pub use factor::{SimpleAccumulationFactor, future_value};
 pub use periods::ElapsedPeriods;
 pub use rate::SimpleInterestRate;

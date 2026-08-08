@@ -205,7 +205,7 @@ impl FromStr for Amount {
 mod tests {
     use super::Amount;
     use crate::{
-        error::{Error, Quantity},
+        error::{Error, Kind, Quantity},
         tolerance::Tolerance,
     };
 
@@ -218,12 +218,20 @@ mod tests {
     #[test]
     fn refuses_non_values() {
         for magnitude in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
-            assert!(matches!(
-                Amount::new(magnitude),
-                Err(Error::NotFinite {
-                    quantity: Quantity::Amount
-                })
-            ));
+            let error = Amount::new(magnitude).expect_err("a non-value is not an Amount");
+            assert!(
+                matches!(
+                    error,
+                    Error::NotFinite {
+                        quantity: Quantity::Amount
+                    }
+                ),
+                "{error:?}"
+            );
+            // A magnitude somebody handed in, so no wider representation
+            // rescues it. The other reading of this variant — a computed value
+            // that outgrew the range — is pinned in `factor`'s tests.
+            assert_eq!(error.kind(), Kind::Domain, "{error:?}");
         }
     }
 

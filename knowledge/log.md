@@ -2,6 +2,15 @@
 
 ## 2026-08-08
 
+- **Update**: Recorded in
+  [failures are classified by remedy](principles/failures-are-classified-by-remedy.md)
+  that the field a shared variant carries makes its class **computable** rather
+  than merely readable, so an accessor answering "what would fix this" is a
+  function of the variant and that field — no variant split, which is what had
+  been proposed. Also recorded that the classification belongs to the library
+  rather than each caller, since only inside the crate is the match exhaustive,
+  and the limit that reading a class off a field rests on a partition nothing
+  enforces.
 - **Creation**: Added
   [we are this bundle's producer, not its consumer](principles/producer-not-consumer.md),
   which states the rule four house rules had each been arguing separately: a

@@ -19,7 +19,7 @@ use std::process::ExitCode;
 
 use clap::{Args, Parser, Subcommand};
 use time_value::{
-    Amount, ElapsedPeriods, SimpleAccumulationFactor, SimpleInterestRate, future_value,
+    Amount, ElapsedPeriods, Kind, SimpleAccumulationFactor, SimpleInterestRate, future_value,
 };
 
 /// Type-safe time-value-of-money calculations.
@@ -202,26 +202,46 @@ fn print_answer(answer: &Answer, json: bool) {
     }
 }
 
+/// Explains the failure, naming the class where the library knows one.
+///
+/// The word is the library's own [`Kind`], not a paraphrase: a reader deciding
+/// what to do next is choosing between changing the model and rescaling it, and
+/// that is exactly what the class says.
 #[expect(
     clippy::print_stderr,
     reason = "a failed run explains itself on stderr; the lint guards libraries"
 )]
 fn report(failure: &Failure) {
     match failure {
-        Failure::Library(error) => eprintln!("error: {error}"),
+        Failure::Library(error) => eprintln!("error ({}): {error}", error.kind()),
         Failure::Usage(message) => eprintln!("error: {message}"),
     }
 }
 
-/// Exit `0` on an answer, `1` on a failed run, and `2` on a usage error — the
-/// last from `clap`, which exits before this is reached.
+/// The exit code for a failure: what would fix it, in one number.
+fn code(failure: &Failure) -> ExitCode {
+    match failure {
+        Failure::Library(error) => match error.kind() {
+            Kind::Domain => ExitCode::from(1),
+            Kind::Representation => ExitCode::from(3),
+        },
+        // Not reachable through `clap`, which exits 2 itself before this runs.
+        // Kept consistent with that rather than inventing a fourth code.
+        Failure::Usage(_) => ExitCode::from(2),
+    }
+}
+
+/// Exit `0` on an answer, `2` on a usage error — from `clap`, before anything
+/// is computed — and, on a failed run, a code naming **what would fix it**: `1`
+/// for a domain failure, `3` for a representation one.
 ///
-/// One code covers both of the library's failure classes, and that is a known
-/// narrowing rather than an oversight: the library distinguishes a domain
-/// failure from a representation one, but exposes no accessor saying which, so
-/// a consumer can only match a `#[non_exhaustive]` enum and guess where a
-/// future variant belongs. Splitting the exit code wants a classifier in the
-/// library, which the MCP surface will want too.
+/// The split is the point rather than a nicety. Those two prescribe opposite
+/// actions — change the model, or rescale it — so a shell handed one code for
+/// both learned only that something went wrong.
+///
+/// It became possible when `Error::kind` landed. Until then this crate could
+/// only match a `#[non_exhaustive]` enum and guess where a future variant
+/// belonged, so it deliberately reported `1` for everything and said so.
 fn main() -> ExitCode {
     let cli = Cli::parse();
     match run(&cli) {
@@ -231,7 +251,7 @@ fn main() -> ExitCode {
         }
         Err(failure) => {
             report(&failure);
-            ExitCode::FAILURE
+            code(&failure)
         }
     }
 }

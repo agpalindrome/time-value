@@ -38,6 +38,38 @@ impl fmt::Display for Quantity {
     }
 }
 
+/// What would fix a failure.
+///
+/// The two classes [failures are classified by remedy] names, and the reason an
+/// error is worth reading at all: they prescribe opposite actions, so telling
+/// them apart is what lets a caller act rather than guess.
+///
+/// **Exhaustive, deliberately.** The principle's test is a question with two
+/// answers — would a wider representation change the answer? — so a caller
+/// matching both arms has covered the domain, and warning them otherwise would
+/// be false. Contrast [`Error`] and [`Quantity`], which are `#[non_exhaustive]`
+/// because both grow as operations arrive.
+///
+/// [failures are classified by remedy]: ../../../../knowledge/principles/failures-are-classified-by-remedy.md
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Kind {
+    /// The inputs were each valid and jointly meaningless, or one was never a
+    /// quantity at all. **Change the model.** No wider representation helps.
+    Domain,
+    /// The arithmetic left what the numbers can hold. **Rescale, or carry more
+    /// precision.** The model was fine.
+    Representation,
+}
+
+impl fmt::Display for Kind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match *self {
+            Self::Domain => "domain",
+            Self::Representation => "representation",
+        })
+    }
+}
+
 /// Everything this crate can fail with.
 ///
 /// The variants separate two kinds of failure: one where the inputs are
@@ -139,6 +171,64 @@ pub enum Error {
     },
 }
 
+impl Error {
+    /// Which class of failure this is, and so what would fix it.
+    ///
+    /// **This lives here rather than in each caller**, and not only to avoid
+    /// repeating it. [`Error`] is `#[non_exhaustive]`, so a downstream match
+    /// needs a wildcard arm and a variant added later lands silently in
+    /// whichever bucket that arm picked. Inside the defining crate the
+    /// match below is exhaustive, so a new variant fails to compile until
+    /// somebody classifies it — which is the only arrangement where
+    /// [failures are classified by remedy]'s claim stays true by
+    /// construction rather than by attention.
+    ///
+    /// **[`Error::NotFinite`] is the one variant that needs its field
+    /// consulted**, and the principle predicted exactly that: "an amount
+    /// that was never a number and a product that outgrew the range are
+    /// different problems with different fixes, and one message served
+    /// both." Its answer was that a shared variant must carry enough to say
+    /// which case it is, and [`Quantity`] is what this library carried. It
+    /// turns out to be sufficient: the quantities a caller supplies are
+    /// non-values on arrival, and the two computed ones are values that
+    /// outgrew the range.
+    ///
+    /// The fragility that leaves is worth naming. `Quantity::Amount` classifies
+    /// as domain because it can only arise from [`crate::Amount::new`]
+    /// rejecting a magnitude somebody passed in. An operation that computed
+    /// a magnitude and handed it to that constructor **without** checking
+    /// the range first would report a representation failure wearing a
+    /// domain label. Today none does — `apply` and `ratio_to` both check
+    /// and report `Quantity::Product` — and the tests below pin both
+    /// directions.
+    ///
+    /// [failures are classified by remedy]: ../../../../knowledge/principles/failures-are-classified-by-remedy.md
+    #[must_use]
+    pub fn kind(&self) -> Kind {
+        match *self {
+            // Each is unfixable by a wider representation: a sign is a sign, a
+            // cancelled difference stays cancelled, a ratio of nothing has no
+            // answer, and text that is not a number never becomes one.
+            Self::NonPositiveFactor { .. }
+            | Self::IndeterminateFactor { .. }
+            | Self::NegativeTolerance { .. }
+            | Self::ZeroDivisor
+            | Self::NegativePeriods { .. }
+            | Self::Unparsable { .. } => Kind::Domain,
+
+            // The range, at the top and at the bottom.
+            Self::Underflow => Kind::Representation,
+
+            Self::NotFinite { quantity } => match quantity {
+                Quantity::Amount | Quantity::Rate | Quantity::Periods | Quantity::Tolerance => {
+                    Kind::Domain
+                }
+                Quantity::Factor | Quantity::Product => Kind::Representation,
+            },
+        }
+    }
+}
+
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
@@ -177,3 +267,62 @@ impl core::error::Error for Error {
 
 /// A [`Result`](core::result::Result) whose error is this crate's [`Error`].
 pub type Result<T> = core::result::Result<T, Error>;
+
+#[cfg(test)]
+mod tests {
+    use super::{Error, Kind, Quantity};
+
+    /// The principle's own test, applied to every variant: would a wider
+    /// representation change the answer? Constructed directly rather than
+    /// raised by an operation, because what is being pinned is the
+    /// classification, and a variant no current operation raises still has
+    /// to be classified.
+    #[test]
+    fn every_variant_is_classified_by_what_would_fix_it() {
+        let cases = [
+            (Error::NonPositiveFactor { factor: -0.5 }, Kind::Domain),
+            (Error::IndeterminateFactor { factor: 1e-17 }, Kind::Domain),
+            (Error::NegativeTolerance { tolerance: -1.0 }, Kind::Domain),
+            (Error::ZeroDivisor, Kind::Domain),
+            (Error::NegativePeriods { periods: -1.0 }, Kind::Domain),
+            (Error::Underflow, Kind::Representation),
+        ];
+        for (error, expected) in cases {
+            assert_eq!(error.kind(), expected, "{error:?}");
+        }
+    }
+
+    /// The variant the principle warned about. One name, two remedies, told
+    /// apart only by the field it was made to carry.
+    #[test]
+    fn not_finite_is_classified_by_the_quantity_it_names() {
+        for supplied in [
+            Quantity::Amount,
+            Quantity::Rate,
+            Quantity::Periods,
+            Quantity::Tolerance,
+        ] {
+            let error = Error::NotFinite { quantity: supplied };
+            assert_eq!(
+                error.kind(),
+                Kind::Domain,
+                "{supplied} is a value a caller hands in, and a non-value is not \
+                 rescued by more bits"
+            );
+        }
+        for computed in [Quantity::Factor, Quantity::Product] {
+            let error = Error::NotFinite { quantity: computed };
+            assert_eq!(
+                error.kind(),
+                Kind::Representation,
+                "{computed} left a range a wider one would hold"
+            );
+        }
+    }
+
+    #[test]
+    fn a_kind_renders_as_the_word_a_message_would_use() {
+        assert_eq!(Kind::Domain.to_string(), "domain");
+        assert_eq!(Kind::Representation.to_string(), "representation");
+    }
+}

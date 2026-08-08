@@ -150,7 +150,7 @@ mod tests {
     use super::{SimpleAccumulationFactor, future_value};
     use crate::{
         amount::Amount,
-        error::{Error, Quantity},
+        error::{Error, Kind, Quantity},
         periods::ElapsedPeriods,
         rate::SimpleInterestRate,
         tolerance::Tolerance,
@@ -233,6 +233,11 @@ mod tests {
             ),
             "{error:?}"
         );
+        // And the classification on the live path, not only the variant. A
+        // computed value that outgrew the range is a representation failure; the
+        // same variant naming a supplied quantity is a domain one, which
+        // `Amount::new`'s own test pins from the other side.
+        assert_eq!(error.kind(), Kind::Representation, "{error:?}");
     }
 
     #[test]
