@@ -39,15 +39,17 @@ CHECKS=(
   "nixfmt|git ls-files -z '*.nix' | xargs -0 nixfmt --check"
   # Reports by default; only `--write-changes` edits.
   "typos|typos"
-  # The bundle's *structure and links*. Its frontmatter invariants are tests in
-  # crates/bundle-check; this is the other half, and it ran by hand from a
-  # sibling repo's flake until okf-tools became a locked input here.
+  # The knowledge bundle has no step of its own. It had one until 2026-08-08,
+  # running okf-graph as a nix-provided binary; okf-graph is now a crate, so the
+  # same checker runs inside crates/bundle-check's tests below — one copy of a
+  # check rather than two that can drift, and a version pinned in Cargo.lock
+  # rather than in flake.lock.
   #
-  # Measured: it exits 1 on a defect and 0 on a report, so a dangling link
-  # prints and does not fail the run. That is the spec's split, not a bug —
-  # §6/§11 say a broken cross-link MUST NOT be rejected — so read the output
-  # rather than only the verdict.
-  "bundle|okf-graph knowledge"
+  # One consequence to know about: okf-graph exits 0 on a *report* (a dangling
+  # link, an out-of-order log entry) and used to print it here. A passing test
+  # prints nothing, so bundle-check fails on a report instead. That is stricter
+  # than the spec, which says a consumer MUST NOT reject a bundle for one, and
+  # the rule says so where it is defined.
   "clippy|cargo clippy --workspace --all-targets --locked"
   "test|cargo nextest run --workspace --locked"
   "doctest|cargo test --doc --workspace --locked"

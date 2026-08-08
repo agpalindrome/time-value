@@ -12,9 +12,15 @@ repository   = "https://github.com/ojhermann-org/time-value"
 
 # Dependencies arrive when something needs them, never in advance.
 [workspace.dependencies]
-# Reads the bundle's YAML frontmatter. Hand-parsing it would repeat the class of
-# bug this test exists to catch.
-saphyr = "0.0.6"
+# Reads the bundle: concepts keyed by id, the spec's own conformance findings,
+# and timestamps as values rather than strings. It is the same `okf-graph` that
+# ran as a nix-provided binary until 2026-08-08, taken as a crate so its version
+# is pinned in Cargo.lock beside everything else rather than in flake.lock.
+#
+# Pre-1.0, and its own changelog says a minor bump may break the API — so `0.1`
+# rather than a looser range, and its `#[non_exhaustive]` types are matched with
+# a wildcard arm rather than exhaustively.
+okf-graph = "0.1"
 
 # Levels are authoritative here; CI adds no `-D warnings`. Every member needs
 # `[lints] workspace = true` or it silently gets none of this.

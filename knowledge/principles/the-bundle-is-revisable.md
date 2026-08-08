@@ -7,7 +7,7 @@ description:
 tags: [standing-rule, process]
 status: stable
 verified: { by: human:ojhermann, at: 2026-08-07T18:50:30Z }
-generated: { by: claude/opus-5, at: 2026-08-07T16:20:15Z }
+generated: { by: claude/opus-5, at: 2026-08-08T14:01:42Z }
 ---
 
 # The rule
@@ -64,3 +64,13 @@ which is what makes a later reader able to tell a claim that a new source could
 overturn from one that only a new preference could. And each records who
 confirmed it and when, so a claim changed after it was last read is visible as
 exactly that rather than having to be remembered.
+
+**Derived — a constraint adopted for an implementation's convenience is labelled
+with the implementation, or it outlives it.** The check on this bundle's
+frontmatter demanded until 2026-08-08 that every timestamp end in `Z`, which the
+OKF spec does not: the narrowing existed only because the staleness comparison
+was made on strings, and it rejected the conformant `+00:00` form. Because the
+rule said so where it was defined, and named the upstream change that would
+remove the need, retiring it the day timestamps could be compared as instants
+was mechanical. Unexplained, the same rule would have read as a claim about the
+world, and a later reader would have had no way to tell it from one.

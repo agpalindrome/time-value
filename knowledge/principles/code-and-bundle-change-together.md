@@ -7,7 +7,7 @@ description:
 tags: [standing-rule, process]
 status: stable
 verified: { by: human:ojhermann, at: 2026-08-07T18:50:30Z }
-generated: { by: claude/opus-5, at: 2026-08-07T18:07:58Z }
+generated: { by: claude/opus-5, at: 2026-08-08T14:01:42Z }
 ---
 
 # The rule
@@ -60,9 +60,10 @@ trigger and is not a gap.
   defeats the only staleness signal there is.
 - **Never write a `verified` entry.** It asserts a human read and confirmed the
   content; an agent writing one is fabricating provenance.
-- **Run `okf-graph` after touching the bundle.** It checks structure and links,
-  not claims — a green run says the bundle is well-formed, never that it is
-  true.
+- **Run the checks after touching the bundle** — `./scripts/check.sh test`,
+  which runs `okf-graph` over it as a library rather than the binary this bullet
+  named until 2026-08-08. They check structure, links and frontmatter, not
+  claims — a green run says the bundle is well-formed, never that it is true.
 - **A correction is written as a correction.** See
   [the bundle is revisable](the-bundle-is-revisable.md): the earlier position
   and why it failed stay readable.

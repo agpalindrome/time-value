@@ -45,15 +45,9 @@ It reports every check rather than stopping at the first failure, and refuses to
 run against a stable `rustfmt`, which would silently ignore most of
 `rustfmt.toml` and pass anyway.
 
-The bundle's frontmatter invariants are part of the tests above. Its structure
-and links are checked separately, from `okf-tools`' own flake:
-
-```sh
-nix run github:ojhermann-org/okf-tools#okf-graph -- knowledge
-```
-
-It does not gate merges; wiring it in is tracked in
-[#136](https://github.com/ojhermann-org/time-value/issues/136).
+The knowledge bundle is checked by those tests too — its structure and links by
+[`okf-graph`](https://crates.io/crates/okf-graph), and its frontmatter by the
+stricter rules this repo holds itself to.
 
 ## Repo settings
 
