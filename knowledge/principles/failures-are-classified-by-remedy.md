@@ -7,7 +7,7 @@ description:
 tags: [standing-rule, errors]
 status: stable
 verified: { by: human:ojhermann, at: 2026-08-07T18:50:30Z }
-generated: { by: claude/opus-5, at: 2026-08-07T17:53:00Z }
+generated: { by: claude/opus-5, at: 2026-08-08T16:30:02Z }
 ---
 
 # The rule
@@ -62,6 +62,21 @@ into many variants is one way; a field naming the quantity is another and is
 what this library chose. What is not acceptable is a single name standing for
 several remedies.
 
+**Derived — that field makes the class computable, not merely readable.** It was
+adopted so a person reading a message could tell which case they had. It turns
+out to be what lets the library _answer_ the question: an accessor returning the
+class is a function of the variant and, for the shared one, of that field.
+Proposing to split the variant instead — on the grounds that one name cannot
+carry two remedies — would have been a breaking change to work already done, one
+reason to check what the existing structure answers before breaking it.
+
+**Derived — the classification belongs to the library, not to each caller.** An
+error type that grows keeps its variants open, so a consumer matching them needs
+a catch-all and a variant added later lands silently in whatever bucket that arm
+picked. Inside the crate the match is exhaustive and a new variant fails to
+compile until somebody classifies it. That is the difference between the rule
+holding by construction and holding by attention.
+
 # Limits
 
 - **Not every failure has a distinct remedy.** Where two conditions really do
@@ -72,3 +87,12 @@ several remedies.
 - **The classification is a claim, so it earns a test** — see
   [a claim earns a test](a-claim-earns-a-test.md). Both misclassifications above
   were live and untested; nothing failed when they were wrong.
+- **Reading the class off a field rests on that field's values partitioning, and
+  nothing enforces it.** The library's identifying field names a quantity, and
+  the class follows because the quantities a caller supplies arrive as
+  non-values while the computed ones outgrow a range. An operation that computed
+  a value and handed it to a supplied quantity's constructor without checking
+  the range first would report a representation failure wearing a domain label.
+  Today none does, and the live paths are tested in both directions — but the
+  partition is a convention among constructors rather than something a type
+  holds.

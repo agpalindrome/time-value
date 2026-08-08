@@ -47,15 +47,31 @@ round-trips, being exactly what `Amount`'s `FromStr` reads back.
 
 ## Exit codes
 
-| code | meaning                                                              |
-| ---- | -------------------------------------------------------------------- |
-| `0`  | an answer, on stdout                                                 |
-| `1`  | the library refused the inputs or could not represent the answer     |
-| `2`  | the arguments did not parse, from `clap` before anything is computed |
+A failed run's code names **what would fix it**, not what went wrong.
 
-`1` covers both of the library's failure classes. It distinguishes a domain
-failure from a representation one, but exposes no accessor saying which, so
-splitting the code wants a classifier in the library rather than a guess here.
+| code | meaning                                                              | remedy                           |
+| ---- | -------------------------------------------------------------------- | -------------------------------- |
+| `0`  | an answer, on stdout                                                 | —                                |
+| `1`  | a **domain** failure: the inputs were jointly meaningless            | change the model                 |
+| `2`  | the arguments did not parse, from `clap` before anything is computed | fix the command line             |
+| `3`  | a **representation** failure: the arithmetic left what a float holds | rescale, or carry more precision |
+
+Those two remedies are opposite, which is why they are different codes:
+
+```sh
+$ time-value simple factor --rate -0.5 --periods 3
+error (domain): accumulation factor `1 + rt` is `-0.5`, not positive
+$ echo $?
+1
+
+$ time-value simple fv --amount 1.7976931348623157e308 --rate 1 --periods 1
+error (representation): product is not finite
+$ echo $?
+3
+```
+
+The class comes from the library's `Error::kind`, so this crate reports the
+distinction rather than deciding it.
 
 ## License
 

@@ -120,6 +120,28 @@ fn a_negative_rate_is_an_argument_and_not_a_flag() {
     assert_eq!(code, 0, "should succeed: {stderr}");
 }
 
+/// A computed value that outgrew the range, which is the *other* class. Exit 3,
+/// not 1: nothing about the model is wrong, and the remedy is to rescale — so a
+/// shell branching on `$?` gets told which of the two it is.
+#[test]
+fn a_representation_failure_exits_three_and_names_the_class() {
+    let (_, stderr, code) = run(&[
+        "simple",
+        "fv",
+        "--amount",
+        "1.7976931348623157e308",
+        "--rate",
+        "1",
+        "--periods",
+        "1",
+    ]);
+    assert!(
+        stderr.contains("(representation)"),
+        "unexpected stderr: {stderr}"
+    );
+    assert_eq!(code, 3, "a representation failure exits 3");
+}
+
 #[test]
 fn a_domain_failure_exits_one_and_says_why() {
     // Each argument is valid alone; the pair is not. The message is the
@@ -131,7 +153,8 @@ fn a_domain_failure_exits_one_and_says_why() {
         stderr.contains("not positive"),
         "unexpected stderr: {stderr}"
     );
-    assert_eq!(code, 1, "a failed run exits 1");
+    assert!(stderr.contains("(domain)"), "unexpected stderr: {stderr}");
+    assert_eq!(code, 1, "a domain failure exits 1");
 }
 
 #[test]
@@ -149,7 +172,7 @@ fn an_invalid_span_is_refused_by_the_library_and_not_by_the_parser() {
         "-1",
     ]);
     assert!(stderr.contains("negative"), "unexpected stderr: {stderr}");
-    assert_eq!(code, 1, "a failed run exits 1");
+    assert_eq!(code, 1, "a domain failure exits 1");
 }
 
 #[test]
