@@ -33,4 +33,6 @@
 
 mod check;
 
-pub use check::{EMPTY_BUNDLE, HOUSE_CODES, Violation, check, house_checks, policy};
+pub use check::{
+    DENIED, EMPTY_BUNDLE, HOUSE_CODES, TOLERATED, Violation, check, house_checks, policy,
+};

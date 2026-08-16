@@ -162,6 +162,20 @@ never as a side effect:
 cargo update okf-graph
 ```
 
+**That command alone cannot cross a minor bump, and it does not say so.** The
+crate is pre-1.0, so `okf-graph = "0.5"` in `Cargo.toml` excludes 0.6 the way
+`"0.2"` excluded 0.5 — and `cargo update` answers a requirement it cannot
+satisfy with `Locking 0 packages`, exit 0. That reads as up to date. Change the
+requirement in `[workspace.dependencies]` first, then update.
+
+**A minor bump can add a rule, and adding one is a decision this bundle owes.**
+0.3.0 added `CONCEPT-15` and it took the spec's default here for three releases,
+because nothing related the policy to the checker's whole rule set. It does now:
+`every_tolerated_rule_has_been_placed` fails until `DENIED` or `TOLERATED` names
+the new rule, and [the principle](knowledge/principles/producer-not-consumer.md)
+carries the row and the reason. So read the changelog on the way past — the test
+says a decision is missing, not what it should be.
+
 **Which of the spec's tolerated findings fail here is the bundle's decision, not
 this crate's.** `okf-graph` exits zero on a report — a dangling cross-link, an
 out-of-order log entry — because §6 and §11 say a consumer MUST NOT reject a
