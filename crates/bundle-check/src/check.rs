@@ -46,12 +46,34 @@ pub const HOUSE_CODES: [&str; 5] = [EMPTY_BUNDLE, "TV-1", "TV-2", "TV-3", "TV-4"
 /// Each is about material this repo wrote, which is the whole test — see the
 /// principle. Named as a list so [`policy`] and the test pinning it read from
 /// one place.
-const DENIED: [Rule; 5] = [
+pub const DENIED: [Rule; 5] = [
     Rule::DanglingLink,
     Rule::DanglingPath,
     Rule::DanglingIndexEntry,
     Rule::DanglingLogEntry,
     Rule::LogOutOfOrder,
+];
+
+/// The spec findings this repo tolerates, each for a reason the principle
+/// gives.
+///
+/// This exists to be *counted*, not to be read at run time — [`policy`] leaves
+/// these at the level `okf-graph` already gives them, so listing them changes
+/// no behaviour. What it buys is the completeness the principle claims: with
+/// [`DENIED`] it must account for every tolerated rule the checker has, and the
+/// test pinning that fails when the checker grows one we have not placed.
+///
+/// `CONCEPT-15` is why this is a list rather than a sentence. It arrived in
+/// `okf-graph` 0.3.0, took the spec's default here, and was named in no row and
+/// no test until the upgrade to 0.5.0 — a decision nobody made,
+/// indistinguishable from one that had been.
+pub const TOLERATED: [Rule; 6] = [
+    Rule::UnknownOkfVersion,
+    Rule::DerivationCycle,
+    Rule::MalformedParameter,
+    Rule::IncompleteAttestation,
+    Rule::MalformedSourceSignal,
+    Rule::StaleConcept,
 ];
 
 /// TV-1 — a concept declares a `generated` family at all.

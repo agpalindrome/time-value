@@ -12,8 +12,8 @@
 
 use std::path::{Path, PathBuf};
 
-use bundle_check::{EMPTY_BUNDLE, Violation, check, house_checks, policy};
-use okf_graph::{Level, Rule, RuleId};
+use bundle_check::{DENIED, EMPTY_BUNDLE, TOLERATED, Violation, check, house_checks, policy};
+use okf_graph::{Level, Rule, RuleId, Severity};
 
 fn bundle_root() -> PathBuf {
     // CARGO_MANIFEST_DIR is crates/bundle-check.
@@ -109,13 +109,7 @@ fn the_policy_matches_the_principle() {
     let policy = policy(&house_checks());
     let level = |rule: Rule| policy.level(&RuleId::Spec(rule));
 
-    for ours in [
-        Rule::DanglingLink,
-        Rule::DanglingPath,
-        Rule::DanglingIndexEntry,
-        Rule::DanglingLogEntry,
-        Rule::LogOutOfOrder,
-    ] {
+    for ours in DENIED {
         assert_eq!(
             level(ours),
             Level::Defect,
@@ -125,19 +119,54 @@ fn the_policy_matches_the_principle() {
     }
 
     // Not ours to fix, and therefore not defects: a tool's vintage, a question
-    // parked upstream, and a surface this bundle does not use.
-    for theirs in [
-        Rule::UnknownOkfVersion,
-        Rule::DerivationCycle,
-        Rule::MalformedParameter,
-        Rule::IncompleteAttestation,
-        Rule::MalformedSourceSignal,
-    ] {
+    // parked upstream, and two surfaces this bundle does not use.
+    for theirs in TOLERATED {
         assert_eq!(
             level(theirs),
             Level::Report,
             "{} is not this repo's to fix",
             theirs.code()
+        );
+    }
+}
+
+/// Every tolerated rule the checker has is one this bundle placed.
+///
+/// The test above pins the two lists against the policy, and until 2026-08-16
+/// that was the whole of it — which pins *agreement* and not *coverage*. A rule
+/// added upstream was in neither list, contradicted neither assertion, and took
+/// the spec's default in silence; `CONCEPT-15` did exactly that for three
+/// releases. Only a rule the spec already calls a defect needs no decision
+/// here, because it fails whatever this repo thinks.
+///
+/// This is the failing direction that looks like success, which is the reason
+/// [we are this bundle's producer, not its consumer] exists at all.
+///
+/// [we are this bundle's producer, not its consumer]: ../../../../knowledge/principles/producer-not-consumer.md
+#[test]
+fn every_tolerated_rule_has_been_placed() {
+    let placed: Vec<Rule> = DENIED.into_iter().chain(TOLERATED).collect();
+
+    for rule in Rule::ALL {
+        if rule.severity() != Severity::Report {
+            continue;
+        }
+        assert!(
+            placed.contains(rule),
+            "{} is tolerated by the spec and placed by neither list — okf-graph \
+             has a rule this bundle has not decided about, so it is running at \
+             the spec's default rather than at a level anybody chose",
+            rule.code()
+        );
+    }
+
+    for rule in placed {
+        assert_eq!(
+            rule.severity(),
+            Severity::Report,
+            "{} is a defect to the spec, so placing it here claims a decision \
+             that is not this repo's to make",
+            rule.code()
         );
     }
 }

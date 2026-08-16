@@ -1,5 +1,18 @@
 # Directory Update Log
 
+## 2026-08-16
+
+- **Update**: Corrected
+  [we are this bundle's producer, not its consumer](principles/producer-not-consumer.md)
+  — its policy table gained `CONCEPT-15`, and the completeness the table claims
+  is now checked rather than asserted. The rule arrived in `okf-graph` 0.3.0 and
+  sat outside the table through the upgrade to 0.5.0, taking the spec's default
+  because the test pinned the policy against a hand-typed list and so measured
+  agreement rather than coverage. The level it inherited is the level the table
+  would have chosen, which is why nothing looked wrong: a green run after an
+  upgrade was indistinguishable from a green run that had considered the new
+  rule.
+
 ## 2026-08-08
 
 - **Update**: Recorded in

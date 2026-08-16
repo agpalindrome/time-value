@@ -6,8 +6,10 @@ description:
   producer, so a finding about our own material is a defect here.
 tags: [standing-rule, process]
 status: stable
-verified: { by: human:ojhermann, at: 2026-08-08T16:01:35Z }
-generated: { by: claude/opus-5, at: 2026-08-08T15:58:48Z }
+verified:
+  - { by: human:ojhermann, at: 2026-08-08T16:01:35Z }
+  - { by: human:ojhermann, at: 2026-08-16T21:10:15Z }
+generated: { by: claude/opus-5, at: 2026-08-16T21:04:58Z }
 sources:
   - id: okf-spec
     resource: https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md
@@ -47,11 +49,27 @@ identifier, so a renamed code does not change what this says.
 | an `okf_version` the checker does not understand (`INDEX-3`)                                                   | report | A statement about the checker's vintage rather than about the bundle. Failing on it would gate our work on a tool's age.       |
 | a derivation cycle (`BUNDLE-4`)                                                                                | report | Whether a cycle is benign or a contradiction is an open question upstream. Denying it would answer that question silently.     |
 | an incomplete attestation contract or an unusable credibility signal (`CONCEPT-9`, `CONCEPT-10`, `CONCEPT-14`) | report | Nothing here has an Attested Computation or a `usage_count`. A policy about a surface we do not use is a policy about nothing. |
+| a concept past its `stale_after` date (`CONCEPT-15`)                                                           | report | No concept here declares `stale_after`. The rule cannot fire, so a level for it states an intention rather than a policy.      |
 
 **Derived — the distinction is ownership, not severity.** The first two rows are
-about material this repo authored; the last three are about a tool's vintage, an
-unsettled question, and a surface we do not use. None of the three is ours to
-fix, which is why none of them is a defect here.
+about material this repo authored; the last four are about a tool's vintage, an
+unsettled question, and two surfaces we do not use. None of them is ours to fix,
+which is why none of them is a defect here.
+
+**Corrected 2026-08-16 — this table is an enumeration, and the set it enumerates
+grows.** `CONCEPT-15` arrived in `okf-graph` 0.3.0 and was absent here through
+the upgrade to 0.5.0: it took the spec's own default and no row, no test and no
+line of `policy` mentioned it. The level it inherited happens to be the level
+this table would have chosen, which is why nothing looked wrong — a green run
+after an upgrade was indistinguishable from a green run that had considered the
+new rule.
+
+**Decided — the table is pinned against the checker's whole rule set, not a list
+typed beside it.** A rule this repo has not placed now fails the build rather
+than inheriting a default, so the completeness this section claims is checked
+instead of asserted. That is this principle applied to itself: a tolerance the
+spec addresses to a consumer reaches us as a default, and a default accepted
+without a decision is the licence the rule exists to refuse.
 
 # It already had four instances before it was written down
 
