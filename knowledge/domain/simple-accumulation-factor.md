@@ -68,8 +68,8 @@ product overflows fail at the **build** step on representation grounds, and the
 implementation had always done so. The argument was overstated, and what
 survives is weaker but true — the steps separate failures by _cause_, not into
 one apiece. The decomposition still earns its place, because the domain rule
-becomes an invariant rather than a repeated check; it is simply not the tidy
-one-to-one the first version claimed.
+becomes an invariant rather than a repeated check; it is not the tidy one-to-one
+the first version claimed.
 
 **Derived — positivity becomes an invariant instead of a check.** Because the
 factor is constructed and validated, `1 + rt > 0` holds for every factor that
@@ -105,8 +105,8 @@ directions is a reasonable test of whether a type is genuine or invented.
 
 **Decided — this covers `(1 + rt)` and nothing else.** Compound interest
 accumulates by `(1 + i)^n`, which is the same kind of object reached a different
-way, and the applying half would be identical. Generalising is deferred until
-there is a second constructor to generalise over — two instances being the point
+way, and the applying half would be identical. Generalizing is deferred until
+there is a second constructor to generalize over — two instances being the point
 at which the shared shape is observed rather than guessed.
 
 # One rounding is required, and in binary that means a fused multiply-add

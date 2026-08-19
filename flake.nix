@@ -108,6 +108,13 @@
               pkgs.cargo-deny
               pkgs.nixfmt
               pkgs.prettier
+              # Prose linting for scripts/check.sh's `prose` step. The version
+              # is pinned by flake.lock rather than by a download line, so a
+              # local run and CI get the same binary — which is the property
+              # ~/.claude's CI buys by pinning 3.17.1 in a curl. This input
+              # currently resolves 3.17.0, a patch behind it; the vendored rules
+              # were themselves measured against 3.17.0.
+              pkgs.vale
             ];
             buildInputs =
               env.preCommit.enabledPackages ++ nixpkgs.lib.optionals pkgs.stdenv.isDarwin [ pkgs.libiconv ];

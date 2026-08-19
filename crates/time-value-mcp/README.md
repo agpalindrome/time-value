@@ -69,7 +69,7 @@ answer; the library declines to invent precision and so does this.
 
 **If you read that with Rust's `serde_json`, enable its `float_roundtrip`
 feature.** Measured 2026-08-08: without it, `from_str` reads that number back as
-`115.0` — serialisation is exact, deserialisation is not.
+`115.0` — serialization is exact, deserialization is not.
 
 ## Result keys mirror the tool name
 

@@ -81,8 +81,8 @@ holding by construction and holding by attention.
 
 # Limits
 
-- **Not every failure has a distinct remedy.** Where two conditions really do
-  prescribe the same action, one variant is right and splitting is ceremony.
+- **Not every failure has a distinct remedy.** Where two conditions do prescribe
+  the same action, one variant is right and splitting is ceremony.
 - **This says nothing about how many variants an error type should have.** It
   says that whatever variants exist must partition by remedy rather than by
   where in the code the check happened to sit.

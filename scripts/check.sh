@@ -20,7 +20,8 @@
 # fixer from here would make a script that verifies into one that edits your
 # tree, so those stay hooks. The two hooks that only report content problems,
 # `typos` and nix formatting, run below in their non-mutating form, because a
-# clone without hooks installed otherwise pushes straight past them.
+# clone without hooks installed otherwise pushes straight past them. Prose
+# linting is here for the same reason and never as a hook: vale only reports.
 set -uo pipefail
 
 cd "$(git rev-parse --show-toplevel)" || exit 99
@@ -39,6 +40,10 @@ CHECKS=(
   "nixfmt|git ls-files -z '*.nix' | xargs -0 nixfmt --check"
   # Reports by default; only `--write-changes` edits.
   "typos|typos"
+  # The word-level half of the house prose style, vendored into .vale/styles
+  # from ~/.claude/vale. Its scope, its empty-list assertion and why the
+  # exclusions cannot live in .vale.ini are all in the script.
+  "prose|./scripts/lint-prose.sh"
   # The knowledge bundle has no step of its own. It had one until 2026-08-08,
   # running okf-graph as a nix-provided binary; okf-graph is now a crate, so the
   # same checker runs inside crates/bundle-check's tests below — one copy of a
