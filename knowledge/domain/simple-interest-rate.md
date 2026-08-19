@@ -83,7 +83,7 @@ rate are one kind of thing or two — deferred until a compound rate exists.
 
 `(1 + rt)` is computed in some numeric type and its result multiplies an
 Amount's magnitude, so `r` cannot be held in one representation while the
-magnitude is held in another. Parameterising [Amount](amount.md) over its
+magnitude is held in another. Parameterizing [Amount](amount.md) over its
 representation therefore carries `r` along with it. This is accepted rather than
 worked around.
 

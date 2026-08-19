@@ -313,7 +313,7 @@ kind that is never re-checked.
 different tolerances for different reasons.
 
 **Decided — they are separate, named operations rather than one with a
-configurable tolerance.** A single parameterised comparison hides which question
+configurable tolerance.** A single parameterized comparison hides which question
 a call site is asking, and the two are not interchangeable:
 
 | question                           | tolerance                        | kind of fact                       |

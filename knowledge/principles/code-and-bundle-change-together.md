@@ -31,10 +31,10 @@ Three questions, asked on every change:
 # The third question is the point
 
 A defect is usually an instance of a rule nobody wrote down. Fixing the instance
-leaves the rule unlearned, so the next instance arrives unrecognised.
+leaves the rule unlearned, so the next instance arrives unrecognized.
 
 Both principles this bundle gained from its first adversarial review were
-already true and simply unrecorded —
+already true and unrecorded —
 [failures are classified by remedy](failures-are-classified-by-remedy.md) was
 violated twice, in two types, by the same reordering mistake, and
 [a claim earns a test](a-claim-earns-a-test.md) came from discovering that
