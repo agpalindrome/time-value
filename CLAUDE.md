@@ -145,6 +145,15 @@ The sentence above said "the only definition of what must **pass**" until
 2026-08-07, which was false in exactly the way it warns against: it named one
 definition where there were two.
 
+The house prose style is enforced as the `prose` check, over every tracked
+markdown file but `crates/bundle-check`'s fixtures. Errors block and warnings do
+not. The rules under `.vale/styles` are vendored from `~/.claude/vale` rather
+than referenced, because a machine-global styles directory is invisible to CI;
+re-vendor with `~/.claude/scripts/sync-vale.sh .`, and pass `--check` to report
+drift without writing. From inside this repo a stale vendored copy looks exactly
+like a live one, so a rule already fixed upstream reads here as a rule that
+needs fixing.
+
 The bundle is checked entirely by the tests in `crates/bundle-check`, which are
 not listed here because the tests are their definition. Both halves are there:
 the OKF spec's own conformance rules come from
